@@ -1,3 +1,69 @@
 spring:
   application:
     name: mediconnect-api
+
+  # [A02] Hardkodovani kredencijali u konfiguracionom fajlu
+  datasource:
+    url: jdbc:mysql://localhost:3306/mediconnect_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    # [A02] SQL šema vidljiva u logovima — curenje strukture baze
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    hibernate:
+      # [A02] ddl-auto: update — destruktivne izmene šeme bez kontrole
+      ddl-auto: update
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  # [A02] Thymeleaf keš isključen — olakšava SSTI istraživanje
+  thymeleaf:
+    cache: false
+
+  mvc:
+    pathmatch:
+      use-suffix-pattern: true
+
+# [A02] Actuator endpointi javno dostupni bez ikakve autentifikacije
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  endpoint:
+    health:
+      show-details: always
+    env:
+      show-values: always
+
+server:
+  port: 8080
+  # [A02] Stack trace i poruke grešaka izloženi klijentu
+  error:
+    include-stacktrace: always
+    include-message: always
+    include-binding-errors: always
+    include-exception: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+
+logging:
+  level:
+    root: DEBUG
+    com.mediconnect: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.springframework.security: DEBUG
