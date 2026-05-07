@@ -7,20 +7,20 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-// [A07] Isti DTO za request i response — audit log kreiran od strane klijenta
-//        može imati lažirani userId, ipAddress i action.
+// [A07] Same DTO for request and response — a client-created audit log entry
+//        can contain a forged userId, ipAddress and action.
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class AuditLogDto {
     private Long id;
-    // [A07] Klijent može lažirati userId u audit logu
+    // [A07] Client can forge the userId in the audit log
     private Long userId;
     private String action;
     private String entityType;
     private Long entityId;
-    // [A07] IP adresa uzeta iz request-a, može biti spoofovana
+    // [A07] IP address taken from the request — can be spoofed via X-Forwarded-For
     private String ipAddress;
     private String userAgent;
     private String details;

@@ -5,8 +5,8 @@ import lombok.*;
 
 import java.time.LocalDate;
 
-// [A04] PII podaci (insurance_number, date_of_birth, blood_type, allergies,
-//        emergency_contact) vidljivi u API odgovoru bez maskovanja.
+// [A04] PII fields (insurance_number, date_of_birth, blood_type, allergies,
+//        emergency_contact) exposed in API responses without masking or encryption.
 @Entity
 @Table(name = "patients")
 @Data

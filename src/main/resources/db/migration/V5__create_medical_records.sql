@@ -1,6 +1,6 @@
--- [A08] Software and Data Integrity Failures: nema content_hash kolone.
--- Bez hash-a fajla nije moguće detektovati neautorizovanu izmjenu attachment-a
--- niti verificirati integritet medicinskih nalaza (diagnosis, prescription).
+-- [A08] Software and Data Integrity Failures: no content_hash column.
+-- Without a file hash it is impossible to detect unauthorized modification of attachments
+-- or to verify the integrity of medical records (diagnosis, prescription).
 CREATE TABLE medical_records (
     id             BIGINT       PRIMARY KEY AUTO_INCREMENT,
     patient_id     BIGINT       NOT NULL,

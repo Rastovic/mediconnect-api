@@ -8,8 +8,8 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-// [A07] Isti DTO za request i response — klijent može postaviti status COMPLETED
-//        i attachmentPath bez laboratorijske verifikacije.
+// [A07] Same DTO for request and response — client can set status to COMPLETED
+//        and supply an attachmentPath without any lab verification.
 @Data
 @Builder
 @NoArgsConstructor
@@ -22,7 +22,7 @@ public class LabResultDto {
     private String resultValue;
     private String unit;
     private String referenceRange;
-    // [A07] Klijent može promijeniti status laboratorijskog nalaza
+    // [A07] Client can change the lab result status directly
     private LabResultStatus status;
     private LocalDateTime testDate;
     private String notes;

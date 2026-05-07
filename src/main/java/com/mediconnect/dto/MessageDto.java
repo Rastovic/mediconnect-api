@@ -7,19 +7,19 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-// [A05] XSS: content polje prima i vraća sirovi HTML/JS bez sanitizacije.
-// [A07] Isti DTO za request i response — klijent može lažirati senderId i
-//        slati poruke u ime drugog korisnika.
+// [A05] XSS: content field accepts and returns raw HTML/JS without sanitization.
+// [A07] Same DTO for request and response — client can spoof the senderId and
+//        send messages on behalf of another user.
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class MessageDto {
     private Long id;
-    // [A07] Klijent može postaviti tuđi senderId — lažiranje pošiljatelja
+    // [A07] Client can supply another user's senderId — sender spoofing
     private Long senderId;
     private Long receiverId;
-    // [A05] Sirovi HTML/JS sadržaj prihvata se i vraća bez obrade
+    // [A05] Raw HTML/JS content accepted and returned without any processing
     private String content;
     private LocalDateTime sentAt;
     private LocalDateTime readAt;

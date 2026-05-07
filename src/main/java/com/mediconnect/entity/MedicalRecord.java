@@ -5,9 +5,9 @@ import lombok.*;
 
 import java.time.LocalDateTime;
 
-// [A08] Software and Data Integrity Failures: nema contentHash polja.
-//        Nije moguće verificirati integritet attachment fajlova niti
-//        detektovati neautorizovane izmjene medicinskih nalaza.
+// [A08] Software and Data Integrity Failures: no contentHash field.
+//        Tampering with attachment files cannot be detected, and the integrity
+//        of diagnoses and prescriptions cannot be verified.
 @Entity
 @Table(name = "medical_records")
 @Data
@@ -42,7 +42,7 @@ public class MedicalRecord {
     @Column(columnDefinition = "TEXT")
     private String prescription;
 
-    // [A08] attachment_path pohranjen bez content_hash — tamperovanje fajlova nedetektabilno
+    // [A08] Stored without a content_hash — file tampering is undetectable
     @Column(length = 500)
     private String attachmentPath;
 

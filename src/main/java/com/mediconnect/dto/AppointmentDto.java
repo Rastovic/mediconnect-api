@@ -8,8 +8,8 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-// [A07] Isti DTO za request i response — klijent može poslati status i direktno
-//        promijeniti stanje termina (npr. APPROVED) bez serverske autorizacije.
+// [A07] Same DTO for request and response — client can send a status value and
+//        change the appointment state (e.g. APPROVED) without server-side authorization.
 @Data
 @Builder
 @NoArgsConstructor
@@ -18,7 +18,7 @@ public class AppointmentDto {
     private Long id;
     private Long patientId;
     private Long doctorId;
-    // [A07] Klijent može postaviti status na APPROVED ili COMPLETED
+    // [A07] Client can set status to APPROVED or COMPLETED directly
     private AppointmentStatus status;
     private LocalDateTime requestedDate;
     private String notes;

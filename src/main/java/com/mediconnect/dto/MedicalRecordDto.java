@@ -7,9 +7,9 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-// [A07] Isti DTO za request i response — klijent može slobodno postaviti patientId,
-//        doctorId i attachmentPath (path traversal vektor).
-// [A08] Nema contentHash polja — integritet attachment-a nije provjerliv.
+// [A07] Same DTO for request and response — client can freely set patientId,
+//        doctorId and attachmentPath (path traversal vector).
+// [A08] No contentHash field — attachment integrity cannot be verified.
 @Data
 @Builder
 @NoArgsConstructor
@@ -21,7 +21,7 @@ public class MedicalRecordDto {
     private Long appointmentId;
     private String diagnosis;
     private String prescription;
-    // [A07+A08] Klijent kontroliše putanju fajla, nema hash provjere
+    // [A07+A08] Client controls the file path — no hash verification
     private String attachmentPath;
     private LocalDateTime createdAt;
 }
