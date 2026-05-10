@@ -24,6 +24,15 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  servlet:
+    multipart:
+      # [A08] CWE-400 Uncontrolled Resource Consumption — no file-size ceiling.
+      #        An attacker uploads a multi-gigabyte file; the JVM buffers it in heap
+      #        (ContentCachingFilter has no contentCacheLimit either), causing OOM.
+      #        Spring Boot default is 1MB/10MB; -1 disables the limit entirely.
+      max-file-size: -1
+      max-request-size: -1
+
   # [A02] Thymeleaf keš isključen — olakšava SSTI istraživanje
   thymeleaf:
     cache: false

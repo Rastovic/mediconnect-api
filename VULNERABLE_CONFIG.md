@@ -971,16 +971,232 @@ No role check, no supervisor approval, no immutable audit sink. A PATIENT can ca
 
 ---
 
+---
+
+## Logging Interceptor — `LoggingInterceptor`, `RequestCachingFilter`, `WebMvcConfig`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `interceptor/LoggingInterceptor.java` | `HandlerInterceptor` — logs IP, method, URI, params, request/response body, User-Agent, stack trace to `audit_logs` |
+| `interceptor/RequestCachingFilter.java` | `OncePerRequestFilter` — wraps every request/response with `ContentCachingRequestWrapper` / `ContentCachingResponseWrapper` so body bytes can be read after Spring MVC consumes them |
+| `config/WebMvcConfig.java` | `WebMvcConfigurer` — registers the interceptor on `/**` and the caching filter at order 1 |
+
+### Vulnerabilities
+
+**66. Information Exposure Through Error Message — ex.printStackTrace(pw) [A08 / CWE-209] — `LoggingInterceptor.java`**
+```java
+if (ex != null) {
+    StringWriter sw = new StringWriter();
+    PrintWriter pw = new PrintWriter(sw);
+    ex.printStackTrace(pw);           // [A08] full JVM stack trace captured
+    details.put("stackTrace", sw.toString());  // persisted to audit_logs.details
+}
+```
+The full stack trace is stored in `audit_logs.details` and readable by any caller via `GET /api/admin/logs` (no role check). Exposed information:
+- Internal class names and package structure (`com.mediconnect.service.UserService.findById`)
+- Framework versions (Spring 3.5.14, Hibernate, Tomcat)
+- SQL query text from `JpaSystemException` / `DataAccessException`
+- File paths from `IOException` (e.g., `/tmp/mediconnect/uploads/`)
+- Full dependency call chain — maps the exact internal architecture for an attacker
+
+---
+
+**67. Sensitive parameters logged without masking [A04 / A09] — `LoggingInterceptor.java`**
+```java
+// [A04][A09] No redaction of password, token, secret, or key fields
+Map<String, String[]> paramMap = request.getParameterMap();
+String params = paramMap.entrySet().stream()
+        .map(e -> e.getKey() + "=" + String.join(",", e.getValue()))
+        .collect(Collectors.joining("; "));
+// Stored: params=username=admin; password=secret123;
+```
+Request body also logged verbatim:
+```java
+requestBody = new String(ccr.getContentAsByteArray(), StandardCharsets.UTF_8);
+// Stored: {"username":"admin","password":"secret123"}  ← plaintext credential in DB
+```
+Every login attempt ever made through the API is recorded as plaintext in `audit_logs`. A single SQL read on a compromised database yields credentials for every user.
+
+---
+
+**68. Log Injection via unsanitized User-Agent [A05 / CWE-117] — `LoggingInterceptor.java`**
+```java
+// [A05] No CR/LF stripping before persistence
+String userAgent = request.getHeader("User-Agent");  // stored verbatim
+```
+Attack — inject a fake audit record by crafting the User-Agent header:
+```
+User-Agent: Mozilla/5.0\r\nACTION: admin granted ADMIN role to user 99
+```
+When the `audit_logs` table is exported to a SIEM, flat-file log, or CSV report, the injected `\r\n` creates a new line that appears as a legitimate audit event, corrupting the security timeline and enabling an attacker to forge their own alibi or frame another user.
+
+---
+
+**69. Spoofable IP address via X-Forwarded-For [A04] — `LoggingInterceptor.java`**
+```java
+// [A04] X-Forwarded-For header trusted without validation
+String ip = request.getHeader("X-Forwarded-For");
+if (ip == null || ip.isBlank()) ip = request.getRemoteAddr();
+// Stored verbatim in audit_logs.ip_address
+```
+An attacker sends `X-Forwarded-For: 127.0.0.1` and their real IP is never recorded. All audit records show `127.0.0.1` as the source, making forensic attribution impossible.
+
+---
+
+**70. Response body logged verbatim — JWT and passwordHash duplicated in audit table [A04] — `LoggingInterceptor.java`**
+```java
+// [A04] Response body stored in audit_logs — may contain JWT tokens or password hashes
+responseBody = new String(ccr.getContentAsByteArray(), StandardCharsets.UTF_8);
+// GET /api/users/1 response: {"id":1,"passwordHash":"5f4dcc3b...","role":"ADMIN"}
+// POST /api/auth/login response: {"token":"eyJhbGciOiJ..."}
+// → both are persisted to audit_logs.details
+```
+The audit table becomes a secondary credential store. Any SQL injection or database breach that reaches `audit_logs` also yields JWT tokens (valid for 30 days) and MD5 password hashes for every request ever logged.
+
+---
+
+---
+
+## Global Exception Handler — `GlobalExceptionHandler`, `EntityNotFoundException`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `exception/EntityNotFoundException.java` | Custom `RuntimeException` carrying `id` (Long) and `tableName` (String) |
+| `exception/GlobalExceptionHandler.java` | `@RestControllerAdvice` — forwards raw exception messages and type names to the client |
+
+### Vulnerabilities
+
+**71. Internal error messages forwarded to client [A02] — `GlobalExceptionHandler.java`**
+```java
+// [A02] Raw exception message forwarded verbatim — no sanitization, no generic fallback
+@ExceptionHandler(RuntimeException.class)
+public ResponseEntity<Map<String, Object>> handleRuntime(RuntimeException ex) {
+    body.put("error", ex.getMessage());        // internal service message
+    body.put("type",  ex.getClass().getName()); // fully-qualified class name
+    ...
+}
+```
+Internal messages exposed through this handler:
+
+| Source | Message forwarded |
+|---|---|
+| `AuthService` | `"User not found: admin"` — username enumeration |
+| `AuthService` | `"Invalid password"` — confirms account exists |
+| `AuthService` | `"Account is locked until 2026-05-10T22:00"` — timing oracle |
+| `UserService` | `"User not found: 5"` — sequential ID leak |
+| `Role.valueOf()` | `"No enum constant com.mediconnect.enums.Role.SUPERADMIN"` — full package path |
+| Hibernate constraint | raw SQL column / index names in violation messages |
+
+The `type` field additionally reveals the fully-qualified class name (e.g. `com.mediconnect.service.UserService`), mapping the internal package structure for an attacker.
+
+---
+
+**72. DB table name and PK exposed on 404 [A02] — `GlobalExceptionHandler.java`, `EntityNotFoundException.java`**
+```java
+// EntityNotFoundException — carries raw persistence details
+super("Entity with ID " + id + " not found in table " + tableName);
+
+// GlobalExceptionHandler response:
+body.put("error", ex.getMessage()); // "Entity with ID 99 not found in table medical_records"
+body.put("id",    ex.getId());      // 99
+body.put("table", ex.getTableName()); // "medical_records"
+```
+Example API response:
+```json
+GET /api/medical-records/99
+→ 404 {
+    "error": "Entity with ID 99 not found in table medical_records",
+    "id": 99,
+    "table": "medical_records",
+    "timestamp": "2026-05-10T22:30:00"
+  }
+```
+An attacker learns the exact table name, enabling targeted SQL injection payload construction. Sequential ID enumeration is confirmed by observing which IDs return 404 vs. 200.
+
+---
+
+**73. JVM-level error forwarded to client [A02] — `GlobalExceptionHandler.java`**
+```java
+@ExceptionHandler(Throwable.class)
+public ResponseEntity<Map<String, Object>> handleThrowable(Throwable ex) {
+    body.put("error", ex.getMessage());         // e.g. "Java heap space"
+    body.put("type",  ex.getClass().getName()); // "java.lang.OutOfMemoryError"
+    ...
+}
+```
+If `ContentCachingFilter` triggers an `OutOfMemoryError` (see vulnerability 74), this handler catches it and returns `{"type":"java.lang.OutOfMemoryError","error":"Java heap space"}` — confirming to the attacker that the DoS payload succeeded and the exact JVM failure mode.
+
+---
+
+## Content Caching Filter — `ContentCachingFilter`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `interceptor/ContentCachingFilter.java` | `@Component` `Filter` — wraps every request/response with `ContentCachingRequestWrapper` / `ContentCachingResponseWrapper` without any size limit |
+
+### Changes
+
+- `config/WebMvcConfig.java` — removed manual `FilterRegistrationBean<RequestCachingFilter>`; body buffering now handled by `ContentCachingFilter` (`@Order(1)`)
+- `src/main/resources/application.yaml` — added `spring.servlet.multipart.max-file-size: -1` and `max-request-size: -1`
+
+### Vulnerabilities
+
+**74. Unbounded memory buffering — ContentCachingRequestWrapper without size limit [A08 / CWE-400] — `ContentCachingFilter.java`**
+```java
+// [A08] Single-argument constructor — no contentCacheLimit, no upper bound
+ContentCachingRequestWrapper cachedRequest = new ContentCachingRequestWrapper(httpRequest);
+```
+`ContentCachingRequestWrapper(HttpServletRequest)` reads the full request body into a `byte[]` on the JVM heap. Combined with unlimited multipart settings:
+```yaml
+# application.yaml
+spring.servlet.multipart.max-file-size: -1    # [A08] no file-size ceiling
+spring.servlet.multipart.max-request-size: -1 # [A08] no request-size ceiling
+```
+Attack — single HTTP request causes Denial of Service:
+```bash
+curl -X POST https://api.mediconnect.com/api/medical-records/1/attachment \
+     -F "file=@/dev/urandom" \   # infinite random byte stream
+     -H "Transfer-Encoding: chunked"
+```
+The JVM allocates heap until `java.lang.OutOfMemoryError: Java heap space` is thrown, taking the entire application offline. No authentication required (SecurityConfig `permitAll()`).
+
+Secure fix:
+```java
+// Two-argument constructor with a reasonable cap
+new ContentCachingRequestWrapper(request, 64 * 1024);  // 64 KB
+```
+```yaml
+spring.servlet.multipart.max-file-size: 10MB
+spring.servlet.multipart.max-request-size: 15MB
+```
+
+---
+
+**75. Response body buffered without limit [A08 / CWE-400] — `ContentCachingFilter.java`**
+```java
+// [A08] Entire response body held in heap simultaneously with the controller's output
+ContentCachingResponseWrapper cachedResponse = new ContentCachingResponseWrapper(httpResponse);
+```
+A large `GET /api/users` response returning 50 000 records is held in heap twice: once by the JPA result set and once by the wrapper. Combined with a large request body in the same request, effective heap pressure is doubled.
+
+---
+
 ## OWASP Category Summary
 
 | ID | Category | Where |
 |---|---|---|
 | A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed); `AppointmentController.java` (IDOR); `MedicalRecordController.java` (any doctor for any patient); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check); `AdminController.java` (admin endpoints open to all callers) |
-| A02 | Cryptographic Failures | `application.yaml`, `V10` (MD5 seed), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars) |
+| A02 | Cryptographic Failures | `application.yaml`, `V10` (MD5 seed), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client) |
 | A03 | Injection / File Upload | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param) |
-| A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response) |
-| A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content) |
+| A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For) |
+| A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF) |
 | A06 | Security Misconfiguration / Missing Business Logic | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, any status transition allowed including `CANCELLED → DISPENSED`) |
 | A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body); `AdminController.java` (role from body → instant ADMIN creation) |
-| A08 | Software and Data Integrity Failures | `pom.xml` (JJWT CVE-2024-31033), `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload) |
-| A09 | Security Logging and Monitoring Failures | `AdminController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack) |
+| A08 | Software and Data Integrity Failures / Resource Exhaustion | `pom.xml` (JJWT CVE-2024-31033), `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `LoggingInterceptor.java` (`ex.printStackTrace(pw)` — full JVM stack trace persisted to DB, CWE-209); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request) |
+| A09 | Security Logging and Monitoring Failures | `AdminController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs; logging errors silently swallowed) |
