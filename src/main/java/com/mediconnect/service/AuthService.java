@@ -26,31 +26,56 @@ public class AuthService {
     //        Client can send {"role":"ADMIN"} and register an admin account.
     // [A07] No password complexity validation: length, characters, entropy.
     // [A04] MD5 without salt — delegated to PasswordUtils.hashPassword()
-    public String register(RegisterRequest request) {
+    public User register(RegisterRequest request) {
+        // [A07] User Enumeration: explicit "username already taken" message reveals
+        //        which usernames are registered, enabling account harvesting.
+        String username = (request.getUsername() != null && !request.getUsername().isBlank())
+                ? request.getUsername()
+                : request.getEmail().split("@")[0];
+
+        if (userRepository.existsByUsername(username)) {
+            throw new RuntimeException("Username already taken: " + username);
+        }
+
+        // [A07] User Enumeration: also confirms which emails are registered
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new RuntimeException("Email already registered: " + request.getEmail());
+        }
+
+        String roleStr = (request.getRole() != null && !request.getRole().isBlank())
+                ? request.getRole()
+                : "PATIENT";
+
         User user = User.builder()
-                .username(request.getUsername())
+                .username(username)
                 .email(request.getEmail())
                 .passwordHash(passwordUtils.hashPassword(request.getPassword()))
-                .role(Role.valueOf(request.getRole()))   // [A07] taken directly from client input
+                .role(Role.valueOf(roleStr))   // [A07] taken directly from client input
                 .active(true)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        userRepository.save(user);
-
-        // [A04] Token returned to caller — will be sent in response body, not in HttpOnly cookie
-        return jwtUtil.generateToken(new UserPrincipal(user));
+        return userRepository.save(user);
     }
 
     // [A07] User Enumeration: three semantically distinct error messages reveal
     //        the account state to an attacker and enable username harvesting.
     // [A07] No rate limiting — unlimited attempts (brute-force / credential stuffing).
-    public String login(LoginRequest request) {
+    public User login(LoginRequest request) {
 
-        // Message 1 — explicitly confirms that the username does NOT exist in the system
-        User user = userRepository.findByUsername(request.getUsername())
-                .orElseThrow(() ->
-                        new RuntimeException("User not found: " + request.getUsername()));
+        // Prefer email lookup (frontend sends email); fall back to username for legacy clients
+        User user;
+        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            // Message 1 variant — confirms the email does NOT exist
+            user = userRepository.findByEmail(request.getEmail())
+                    .orElseThrow(() ->
+                            new RuntimeException("User not found: " + request.getEmail()));
+        } else {
+            // Message 1 — explicitly confirms that the username does NOT exist in the system
+            user = userRepository.findByUsername(request.getUsername())
+                    .orElseThrow(() ->
+                            new RuntimeException("User not found: " + request.getUsername()));
+        }
 
         // Message 2 — confirms that the user EXISTS but the password is wrong
         if (!passwordUtils.matches(request.getPassword(), user.getPasswordHash())) {
@@ -64,7 +89,6 @@ public class AuthService {
             throw new RuntimeException("Account is locked until " + user.getLockedUntil());
         }
 
-        // [A04] Token returned to caller — will be sent in response body
-        return jwtUtil.generateToken(new UserPrincipal(user));
+        return user;
     }
 }

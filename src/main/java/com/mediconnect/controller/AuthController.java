@@ -2,12 +2,16 @@ package com.mediconnect.controller;
 
 import com.mediconnect.dto.LoginRequest;
 import com.mediconnect.dto.RegisterRequest;
+import com.mediconnect.entity.User;
+import com.mediconnect.security.JwtUtil;
+import com.mediconnect.security.UserPrincipal;
 import com.mediconnect.service.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 // [A07] No @Valid on request body — input is not even syntactically validated.
@@ -20,35 +24,62 @@ import java.util.Map;
 public class AuthController {
 
     private final AuthService authService;
+    private final JwtUtil jwtUtil;
 
     // [A07] Mass Assignment: role field from request body written directly into the User entity.
     // [A07] No password complexity validation.
+    // [A07] User Enumeration: "Username already taken: {username}" reveals registered usernames.
     @PostMapping("/register")
-    public ResponseEntity<Map<String, String>> register(@RequestBody RegisterRequest request) {
-        String token = authService.register(request);
-        // [A04] JWT in JSON response body — not in an HttpOnly cookie
-        return ResponseEntity
-                .status(HttpStatus.CREATED)
-                .body(Map.of("token", token));
+    public ResponseEntity<Map<String, Object>> register(@RequestBody RegisterRequest request) {
+        try {
+            User user = authService.register(request);
+            String token = jwtUtil.generateToken(new UserPrincipal(user));
+            // [A04] JWT in JSON response body — not in an HttpOnly cookie
+            return ResponseEntity
+                    .status(HttpStatus.CREATED)
+                    .body(buildAuthResponse(token, user));
+        } catch (RuntimeException e) {
+            // [A07] Raw error message forwarded — leaks which usernames exist
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 
     // [A07] User Enumeration: raw error message from service forwarded to client without
     //        filtering — three distinct account states revealed to the attacker:
-    //          "User not found: {username}"       → username does not exist
-    //          "Invalid password"                 → username exists, wrong password
-    //          "Account is locked until {time}"   → account exists, password correct, locked
+    //          "User not found: {email/username}"  → account does not exist
+    //          "Invalid password"                  → account exists, wrong password
+    //          "Account is locked until {time}"    → account exists, password correct, locked
     // [A07] No rate limiting — brute-force and credential stuffing attacks are possible.
     @PostMapping("/login")
-    public ResponseEntity<Map<String, String>> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<Map<String, Object>> login(@RequestBody LoginRequest request) {
         try {
-            String token = authService.login(request);
+            User user = authService.login(request);
+            String token = jwtUtil.generateToken(new UserPrincipal(user));
             // [A04] JWT in JSON response body — not in an HttpOnly cookie
-            return ResponseEntity.ok(Map.of("token", token));
+            return ResponseEntity.ok(buildAuthResponse(token, user));
         } catch (RuntimeException e) {
             // [A07] Original error message forwarded without any generalization
             return ResponseEntity
                     .status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", e.getMessage()));
         }
+    }
+
+    // [A04] passwordHash included in auth response — exposed to any JS reading the response
+    private Map<String, Object> buildAuthResponse(String token, User user) {
+        Map<String, Object> userMap = new LinkedHashMap<>();
+        userMap.put("id", user.getId());
+        userMap.put("email", user.getEmail());
+        userMap.put("username", user.getUsername());
+        userMap.put("role", user.getRole().name());
+        // [A04] passwordHash intentionally included — visible to client-side JavaScript
+        userMap.put("passwordHash", user.getPasswordHash());
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("token", token);
+        response.put("user", userMap);
+        return response;
     }
 }

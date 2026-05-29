@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-// [A07] Isti DTO za request i response.
+// [A07] Same DTO for request and response.
 @Data
 @Builder
 @NoArgsConstructor
@@ -13,6 +13,8 @@ import lombok.NoArgsConstructor;
 public class DoctorDto {
     private Long id;
     private Long userId;
+    private String username;
+    private String email;
     private String specialty;
     private String licenseNumber;
     private String hospital;

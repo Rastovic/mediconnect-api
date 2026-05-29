@@ -2,7 +2,7 @@ spring:
   application:
     name: mediconnect-api
 
-  # [A02] Hardkodovani kredencijali u konfiguracionom fajlu
+  # [A02] Hardcoded credentials in a plain-text configuration file committed to the repository
   datasource:
     url: jdbc:mysql://localhost:3306/mediconnect_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
     username: root
@@ -10,13 +10,13 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
-    # [A02] SQL šema vidljiva u logovima — curenje strukture baze
+    # [A02] SQL schema visible in logs — leaks database structure and bound parameter values
     show-sql: true
     properties:
       hibernate:
         format_sql: true
     hibernate:
-      # [A02] ddl-auto: update — destruktivne izmene šeme bez kontrole
+      # [A02] ddl-auto: update — Hibernate alters the schema on startup, bypassing Flyway migration control
       ddl-auto: update
 
   flyway:
@@ -33,7 +33,7 @@ spring:
       max-file-size: -1
       max-request-size: -1
 
-  # [A02] Thymeleaf keš isključen — olakšava SSTI istraživanje
+  # [A02] Thymeleaf cache disabled — supports Server-Side Template Injection exploration
   thymeleaf:
     cache: false
 
@@ -41,7 +41,7 @@ spring:
     pathmatch:
       use-suffix-pattern: true
 
-# [A02] Actuator endpointi javno dostupni bez ikakve autentifikacije
+# [A02] All Actuator endpoints publicly exposed without authentication
 management:
   endpoints:
     web:
@@ -54,8 +54,8 @@ management:
       show-values: always
 
 server:
-  port: 8080
-  # [A02] Stack trace i poruke grešaka izloženi klijentu
+  port: 8085
+  # [A02] Full stack trace and internal error messages exposed to the client
   error:
     include-stacktrace: always
     include-message: always

