@@ -31,6 +31,17 @@ public class UserService {
         return toDto(user);
     }
 
+    // [A01] IDOR — no check that the authenticated caller is the user being updated.
+    //        Any user can update any other user's email by guessing their id.
+    public UserDto update(Long id, UserDto dto) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("User not found: " + id));
+        if (dto.getEmail() != null && !dto.getEmail().isBlank()) {
+            user.setEmail(dto.getEmail());
+        }
+        return toDto(userRepository.save(user));
+    }
+
     // [A01] Mass Assignment — role String taken directly from caller, no whitelist check
     public UserDto updateRole(Long id, String role) {
         User user = userRepository.findById(id)

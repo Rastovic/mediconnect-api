@@ -22,6 +22,12 @@ public class MedicalRecordController {
 
     private final MedicalRecordService medicalRecordService;
 
+    // [A01] No access control — any caller receives all medical records
+    @GetMapping
+    public ResponseEntity<List<MedicalRecordDto>> getAllRecords() {
+        return ResponseEntity.ok(medicalRecordService.findAll());
+    }
+
     // [A01] Any authenticated DOCTOR (or unauthenticated caller, given permitAll)
     //        can create a medical record for ANY patient.
     //        No verification that the doctor has ever treated this patient,

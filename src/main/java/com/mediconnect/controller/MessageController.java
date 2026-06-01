@@ -1,5 +1,6 @@
 package com.mediconnect.controller;
 
+import com.mediconnect.dto.ConversationDto;
 import com.mediconnect.dto.MessageDto;
 import com.mediconnect.service.MessageService;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,12 @@ import java.util.List;
 public class MessageController {
 
     private final MessageService messageService;
+
+    // [A01] userId query param not verified against JWT — any user can fetch any other user's conversations
+    @GetMapping("/conversations")
+    public ResponseEntity<List<ConversationDto>> getConversations(@RequestParam Long userId) {
+        return ResponseEntity.ok(messageService.getConversations(userId));
+    }
 
     // [A05] Stored XSS — content field written to the database verbatim.
     //        Any HTML or JavaScript in the payload is stored and returned to

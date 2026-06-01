@@ -24,7 +24,8 @@ public class LabResultDto {
     private String referenceRange;
     // [A07] Client can change the lab result status directly
     private LabResultStatus status;
-    private LocalDateTime testDate;
+    // Field name matches frontend interface (resultDate)
+    private LocalDateTime resultDate;
     private String notes;
     private String attachmentPath;
 }

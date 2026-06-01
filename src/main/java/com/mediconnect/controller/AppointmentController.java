@@ -82,6 +82,19 @@ public class AppointmentController {
                 .body(pdfBytes);
     }
 
+    // [A01] IDOR — no ownership check. Any authenticated user can update any appointment.
+    //        Only future appointments are allowed to be updated (date/notes).
+    @PutMapping("/{id}")
+    public ResponseEntity<?> updateAppointment(
+            @PathVariable Long id,
+            @RequestBody AppointmentDto dto) {
+        try {
+            return ResponseEntity.ok(appointmentService.update(id, dto));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", e.getMessage()));
+        }
+    }
+
     @PostMapping
     public ResponseEntity<AppointmentDto> createAppointment(@RequestBody AppointmentDto dto) {
         return ResponseEntity.status(201).body(appointmentService.create(dto));

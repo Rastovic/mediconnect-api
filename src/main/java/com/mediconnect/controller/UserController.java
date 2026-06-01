@@ -33,6 +33,15 @@ public class UserController {
         return ResponseEntity.ok(userService.findById(id));
     }
 
+    // [A01] IDOR — no ownership check, any authenticated user can update any other user's profile.
+    //        firstName/lastName/phone from the body are silently ignored (no such columns in users table).
+    @PutMapping("/{id}")
+    public ResponseEntity<UserDto> updateUser(
+            @PathVariable Long id,
+            @RequestBody UserDto dto) {
+        return ResponseEntity.ok(userService.update(id, dto));
+    }
+
     // [A01] Mass Assignment — 'role' value comes directly from the request body
     //        with no server-side validation or whitelist.
     //        Any authenticated (or unauthenticated, given SecurityConfig) caller

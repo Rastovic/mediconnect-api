@@ -54,12 +54,15 @@ public class MedicalRecordService {
             // [A01] appointment.doctor_id vs dto.getDoctorId() is never compared
         }
 
+        // notes from frontend maps to prescription column
+        String prescriptionValue = dto.getNotes() != null ? dto.getNotes() : dto.getPrescription();
+
         MedicalRecord record = MedicalRecord.builder()
                 .patient(patient)
                 .doctor(doctor)
                 .appointment(appointment)
                 .diagnosis(dto.getDiagnosis())
-                .prescription(dto.getPrescription())
+                .prescription(prescriptionValue)
                 .createdAt(LocalDateTime.now())
                 // [A08] attachmentPath stored without content_hash
                 .build();
@@ -140,6 +143,14 @@ public class MedicalRecordService {
         return toDto(record);
     }
 
+    // [A01] No access control — any caller gets all records
+    public List<MedicalRecordDto> findAll() {
+        return medicalRecordRepository.findAll()
+                .stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
     public List<MedicalRecordDto> findByPatientId(Long patientId) {
         // [A01] No check that the caller is the patient or their treating doctor
         return medicalRecordRepository.findByPatientId(patientId)
@@ -153,9 +164,12 @@ public class MedicalRecordService {
                 .id(r.getId())
                 .patientId(r.getPatient().getId())
                 .doctorId(r.getDoctor().getId())
+                .patientName(r.getPatient().getUser().getUsername())
+                .doctorName(r.getDoctor().getUser().getUsername())
                 .appointmentId(r.getAppointment() != null ? r.getAppointment().getId() : null)
                 .diagnosis(r.getDiagnosis())
                 .prescription(r.getPrescription())
+                .notes(r.getPrescription())
                 // [A08] attachmentPath exposed — no hash, no signed URL
                 .attachmentPath(r.getAttachmentPath())
                 .createdAt(r.getCreatedAt())

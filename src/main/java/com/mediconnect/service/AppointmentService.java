@@ -4,12 +4,15 @@ import com.mediconnect.dto.AppointmentDto;
 import com.mediconnect.entity.Appointment;
 import com.mediconnect.entity.Doctor;
 import com.mediconnect.entity.Patient;
+import com.mediconnect.entity.User;
 import com.mediconnect.enums.AppointmentStatus;
 import com.mediconnect.repository.AppointmentRepository;
 import com.mediconnect.repository.DoctorRepository;
 import com.mediconnect.repository.PatientRepository;
+import com.mediconnect.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -24,6 +27,7 @@ public class AppointmentService {
     private final AppointmentRepository appointmentRepository;
     private final PatientRepository patientRepository;
     private final DoctorRepository doctorRepository;
+    private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
 
     // [A05] SQL Injection — doctorName concatenated directly into the query string.
@@ -33,23 +37,33 @@ public class AppointmentService {
     //        Attack: doctorName = "' UNION SELECT username,password_hash,3,4,5,6,7 FROM users --"
     //                → dumps the users table through the appointment response.
     public List<AppointmentDto> searchAppointments(String doctorName) {
+        // [A05] SQL Injection — doctorName concatenated directly into the query string.
         String sql = "SELECT a.id, a.patient_id, a.doctor_id, a.status, " +
-                     "       a.requested_date, a.notes, a.created_at " +
+                     "       a.requested_date, a.notes, a.created_at, " +
+                     "       up.username AS patient_name, ud.username AS doctor_name " +
                      "FROM appointments a " +
-                     "JOIN doctors d ON a.doctor_id = d.id " +
-                     "JOIN users u ON d.user_id = u.id " +
+                     "JOIN doctors d  ON a.doctor_id  = d.id " +
+                     "JOIN users ud   ON d.user_id    = ud.id " +
+                     "JOIN patients p ON a.patient_id = p.id " +
+                     "JOIN users up   ON p.user_id    = up.id " +
                      // [A05] raw string concatenation — no PreparedStatement placeholder
-                     "WHERE u.username LIKE '%" + doctorName + "%'";
+                     "WHERE ud.username LIKE '%" + doctorName + "%'";
 
-        return jdbcTemplate.query(sql, (rs, rowNum) -> AppointmentDto.builder()
-                .id(rs.getLong("id"))
-                .patientId(rs.getLong("patient_id"))
-                .doctorId(rs.getLong("doctor_id"))
-                .status(AppointmentStatus.valueOf(rs.getString("status")))
-                .requestedDate(rs.getObject("requested_date", LocalDateTime.class))
-                .notes(rs.getString("notes"))
-                .createdAt(rs.getObject("created_at", LocalDateTime.class))
-                .build());
+        return jdbcTemplate.query(sql, (rs, rowNum) -> {
+            LocalDateTime requestedDate = rs.getObject("requested_date", LocalDateTime.class);
+            return AppointmentDto.builder()
+                    .id(rs.getLong("id"))
+                    .patientId(rs.getLong("patient_id"))
+                    .doctorId(rs.getLong("doctor_id"))
+                    .patientName(rs.getString("patient_name"))
+                    .doctorName(rs.getString("doctor_name"))
+                    .status(AppointmentStatus.valueOf(rs.getString("status")))
+                    .requestedDate(requestedDate)
+                    .scheduledAt(requestedDate)
+                    .notes(rs.getString("notes"))
+                    .createdAt(rs.getObject("created_at", LocalDateTime.class))
+                    .build();
+        });
     }
 
     // [A01] IDOR — no verification that the authenticated caller is the patient
@@ -77,9 +91,35 @@ public class AppointmentService {
         return toDto(appointmentRepository.save(appointment));
     }
 
+    // [A01] IDOR — no ownership check. Any authenticated user can update any appointment.
+    public AppointmentDto update(Long id, AppointmentDto dto) {
+        Appointment appointment = appointmentRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Appointment not found: " + id));
+
+        if (appointment.getRequestedDate() == null
+                || !appointment.getRequestedDate().isAfter(LocalDateTime.now())) {
+            throw new IllegalStateException("Only future appointments can be updated");
+        }
+
+        if (dto.getRequestedDate() != null) {
+            if (!dto.getRequestedDate().isAfter(LocalDateTime.now())) {
+                throw new IllegalArgumentException("Requested date must be in the future");
+            }
+            appointment.setRequestedDate(dto.getRequestedDate());
+        }
+        if (dto.getNotes() != null) {
+            appointment.setNotes(dto.getNotes());
+        }
+
+        return toDto(appointmentRepository.save(appointment));
+    }
+
     public AppointmentDto create(AppointmentDto dto) {
-        Patient patient = patientRepository.findById(dto.getPatientId())
-                .orElseThrow(() -> new RuntimeException("Patient not found: " + dto.getPatientId()));
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        User currentUser = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Authenticated user not found: " + username));
+        Patient patient = patientRepository.findByUserId(currentUser.getId())
+                .orElseThrow(() -> new RuntimeException("No patient profile for user: " + username));
         Doctor doctor = doctorRepository.findById(dto.getDoctorId())
                 .orElseThrow(() -> new RuntimeException("Doctor not found: " + dto.getDoctorId()));
 
@@ -176,8 +216,11 @@ public class AppointmentService {
                 .id(a.getId())
                 .patientId(a.getPatient().getId())
                 .doctorId(a.getDoctor().getId())
+                .patientName(a.getPatient().getUser().getUsername())
+                .doctorName(a.getDoctor().getUser().getUsername())
                 .status(a.getStatus())
                 .requestedDate(a.getRequestedDate())
+                .scheduledAt(a.getRequestedDate())
                 .notes(a.getNotes())
                 .createdAt(a.getCreatedAt())
                 .build();

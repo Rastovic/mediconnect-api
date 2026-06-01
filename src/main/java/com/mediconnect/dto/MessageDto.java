@@ -18,9 +18,11 @@ public class MessageDto {
     private Long id;
     // [A07] Client can supply another user's senderId — sender spoofing
     private Long senderId;
+    private String senderEmail;
     private Long receiverId;
     // [A05] Raw HTML/JS content accepted and returned without any processing
     private String content;
     private LocalDateTime sentAt;
     private LocalDateTime readAt;
+    private boolean read;
 }

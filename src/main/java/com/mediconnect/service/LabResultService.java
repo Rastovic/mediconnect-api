@@ -11,6 +11,7 @@ import com.mediconnect.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -77,7 +78,7 @@ public class LabResultService {
                 .unit(rs.getString("unit"))
                 .referenceRange(rs.getString("reference_range"))
                 .status(LabResultStatus.valueOf(rs.getString("status")))
-                .testDate(rs.getObject("test_date", LocalDateTime.class))
+                .resultDate(rs.getObject("test_date", LocalDateTime.class))
                 .notes(rs.getString("notes"))
                 .attachmentPath(rs.getString("attachment_path"))
                 .build());
@@ -153,8 +154,10 @@ public class LabResultService {
     public LabResultDto create(LabResultDto dto) {
         Patient patient = patientRepository.findById(dto.getPatientId())
                 .orElseThrow(() -> new RuntimeException("Patient not found: " + dto.getPatientId()));
-        User labTech = userRepository.findById(dto.getLabTechId())
-                .orElseThrow(() -> new RuntimeException("Lab tech not found: " + dto.getLabTechId()));
+        // Resolve lab tech from JWT — frontend does not send labTechId
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        User labTech = userRepository.findByUsername(username)
+                .orElseThrow(() -> new RuntimeException("Authenticated user not found: " + username));
 
         LabResult lr = LabResult.builder()
                 .patient(patient)
@@ -187,7 +190,7 @@ public class LabResultService {
                 .unit(lr.getUnit())
                 .referenceRange(lr.getReferenceRange())
                 .status(lr.getStatus())
-                .testDate(lr.getTestDate())
+                .resultDate(lr.getTestDate())
                 .notes(lr.getNotes())
                 .attachmentPath(lr.getAttachmentPath())
                 .build();

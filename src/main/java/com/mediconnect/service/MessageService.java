@@ -1,5 +1,6 @@
 package com.mediconnect.service;
 
+import com.mediconnect.dto.ConversationDto;
 import com.mediconnect.dto.MessageDto;
 import com.mediconnect.entity.Message;
 import com.mediconnect.entity.User;
@@ -102,15 +103,49 @@ public class MessageService {
         return toDto(messageRepository.save(message));
     }
 
+    // [A01] userId accepted as query param, never verified against JWT principal
+    public List<ConversationDto> getConversations(Long userId) {
+        List<Message> sent     = messageRepository.findBySenderId(userId);
+        List<Message> received = messageRepository.findByReceiverId(userId);
+
+        java.util.Map<Long, java.util.List<Message>> byPartner = new java.util.HashMap<>();
+        for (Message m : sent) {
+            byPartner.computeIfAbsent(m.getReceiver().getId(), k -> new ArrayList<>()).add(m);
+        }
+        for (Message m : received) {
+            byPartner.computeIfAbsent(m.getSender().getId(), k -> new ArrayList<>()).add(m);
+        }
+
+        return byPartner.entrySet().stream().map(entry -> {
+            List<Message> msgs = entry.getValue().stream()
+                    .sorted(Comparator.comparing(Message::getSentAt))
+                    .collect(Collectors.toList());
+            Message last = msgs.get(msgs.size() - 1);
+            long unread = msgs.stream()
+                    .filter(m -> m.getReceiver().getId().equals(userId) && m.getReadAt() == null)
+                    .count();
+            User partner = userRepository.findById(entry.getKey())
+                    .orElseThrow(() -> new RuntimeException("User not found: " + entry.getKey()));
+            return ConversationDto.builder()
+                    .userId(partner.getId())
+                    .email(partner.getEmail())
+                    .lastMessage(last.getContent())
+                    .unread(unread)
+                    .build();
+        }).collect(Collectors.toList());
+    }
+
     private MessageDto toDto(Message m) {
         return MessageDto.builder()
                 .id(m.getId())
                 .senderId(m.getSender().getId())
+                .senderEmail(m.getSender().getEmail())
                 .receiverId(m.getReceiver().getId())
                 // [A05] content returned verbatim — XSS payload is delivered untouched
                 .content(m.getContent())
                 .sentAt(m.getSentAt())
                 .readAt(m.getReadAt())
+                .read(m.getReadAt() != null)
                 .build();
     }
 }
