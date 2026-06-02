@@ -1636,16 +1636,90 @@ When `patientId` is omitted from the request, `searchLabResults()` no longer app
 
 ---
 
+---
+
+**107. [A01] `PUT /api/medical-records/{id}` — no ownership check — `MedicalRecordController.java`, `MedicalRecordService.java`**
+```java
+// [A01] No ownership check — any authenticated user can update any medical record
+@PutMapping("/{id}")
+public ResponseEntity<MedicalRecordDto> updateRecord(@PathVariable Long id, @RequestBody MedicalRecordDto dto) {
+    return ResponseEntity.ok(medicalRecordService.update(id, dto));
+}
+```
+Any authenticated user (including a PATIENT) can send `PUT /api/medical-records/1` with a new diagnosis and notes, overwriting a record that belongs to any other patient. No check that `authentication.name` matches the record's patient or doctor.
+
+---
+
+**108. [A01] `PUT /api/prescriptions/{id}/dispense` — no pharmacist role check — `PrescriptionController.java`**
+```java
+// [A01] No role check — any caller (PATIENT, DOCTOR, LAB_TECH) can dispense
+@PutMapping("/{id}/dispense")
+public ResponseEntity<PrescriptionDto> dispense(@PathVariable Long id, @RequestBody Map<String, Long> body) {
+    return ResponseEntity.ok(prescriptionService.dispense(id, body.get("pharmacistId")));
+}
+```
+The dispense endpoint requires no `PHARMACIST` role. A PATIENT can call `PUT /api/prescriptions/5/dispense` and mark their own prescription as dispensed, bypassing pharmacy workflow.
+
+---
+
+**109. [A07] `pharmacistId` from request body — mass assignment — `PrescriptionController.java`**
+```java
+Long pharmacistId = body.get("pharmacistId");  // attacker-supplied, not from JWT
+return ResponseEntity.ok(prescriptionService.dispense(id, pharmacistId));
+```
+The pharmacist identity recorded in the audit trail is taken from the request body, not from the authenticated session. Any caller can attribute a dispense action to any pharmacist user ID, forging the medication dispensing record.
+
+---
+
+**110. [A06] No state machine on dispense — double dispensing and void prescription dispensing — `PrescriptionService.java`**
+```java
+// [A06] No guard: DISPENSED → DISPENSED and CANCELLED → DISPENSED both allowed
+prescription.setStatus(PrescriptionStatus.DISPENSED);
+prescription.setPharmacistId(pharmacistId);
+prescription.setDispensedAt(LocalDateTime.now());
+```
+The dispense method never checks the current status before transitioning. Allowed by the missing state machine: `DISPENSED → DISPENSED` (duplicate supply / billing fraud) and `CANCELLED → DISPENSED` (dispensing a voided prescription — pharmaceutical fraud).
+
+---
+
+**111. [A01] Edit button in Medical Records — no ownership check on server — `MedicalRecordsPage.tsx`**
+```tsx
+// Edit shown for all non-patient staff — but server does no ownership check on PUT /{id}
+{!isPatient && (
+  <Button size="sm" variant="outline" onClick={() => openEditModal(rec)}>
+    <Edit size={11} className="mr-1" />
+    Edit
+  </Button>
+)}
+```
+The Edit button is shown for all non-patient roles (DOCTOR, LAB_TECH, PHARMACIST, ADMIN). The server-side `PUT /medical-records/{id}` endpoint (#107) has no ownership check, so a LAB_TECH or PHARMACIST can modify a record that was created by a different doctor for a different patient. Any staff member can overwrite any diagnosis in the system.
+
+---
+
+**112. [A01] Dispense button shown for all roles — `MedicalRecordsPage.tsx` Prescriptions tab**
+```tsx
+{/* [A01] No pharmacist role check — any role can dispense */}
+{p.status === 'CREATED' && (
+  <Button size="sm" variant="outline" onClick={() => dispenseMutation.mutate(p.id)}>
+    <Pill size={11} className="mr-1" />
+    Dispense
+  </Button>
+)}
+```
+The Dispense button is shown and functional for every authenticated user regardless of role. A PATIENT visiting the Prescriptions tab can dispense any CREATED prescription system-wide. Combined with #109, they can also attribute the action to a different pharmacist.
+
+---
+
 ## OWASP Category Summary
 
 | ID | Category | Where |
 |---|---|---|
-| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed, PUT /users/{id} no ownership check #95); `AppointmentController.java` (IDOR GET, IDOR PUT #92); `MedicalRecordController.java` (any doctor for any patient; GET all records no access control #93); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check, GET /conversations userId not verified #94); `AdminController.java` (admin endpoints open to all callers); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); `LabResultService.java` (null patientId → all results exposed #106); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86); `App.tsx` + `StaffDashboardPage.tsx` (/staff route no role guard #102); `Sidebar.tsx` (unread badge userId param not verified #101; role-based dashboard link client-side only #103); `DashboardPage.tsx` (client-side patient filter on appointments #104); `StaffDashboardPage.tsx` (client-side doctor filter on appointments #105) |
+| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed, PUT /users/{id} no ownership check #95); `AppointmentController.java` (IDOR GET, IDOR PUT #92); `MedicalRecordController.java` (any doctor for any patient; GET all records no access control #93; PUT /{id} no ownership check #107); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check, GET /conversations userId not verified #94); `AdminController.java` (admin endpoints open to all callers); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); `LabResultService.java` (null patientId → all results exposed #106); `PrescriptionController.java` (dispense no role check #108); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86); `App.tsx` + `StaffDashboardPage.tsx` (/staff route no role guard #102); `Sidebar.tsx` (unread badge userId param not verified #101; role-based dashboard link client-side only #103); `DashboardPage.tsx` (client-side patient filter on appointments #104); `StaffDashboardPage.tsx` (client-side doctor filter on appointments #105); `MedicalRecordsPage.tsx` (Edit button all roles #111; Dispense button all roles #112) |
 | A02 | Cryptographic Failures | `application.yaml`, `V10`/`V11`/`V12` (MD5 seed passwords for all 9 accounts #96), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82) |
 | A03 | Injection / File Upload | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param) |
 | A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For); **Frontend**: `AuthContext.tsx` (JWT + passwordHash in localStorage #76, #79; unverified JWT decode #77); `axiosInstance.ts` (localStorage read on every request #81); `DashboardPage.tsx` (Token Inspector widget #83; user ID in greeting banner #99); `ProfilePage.tsx` (JWT in URL query param on export #85) |
 | A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); `StatsController.java` (GET /recent — all users' events with no auth filter #97; unreadMessages system-wide count #98); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84); `DashboardPage.tsx` (recent activity feed renders cross-user events #100) |
-| A06 | Security Misconfiguration / Missing Business Logic | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, any status transition allowed including `CANCELLED → DISPENSED`) |
-| A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body); `AdminController.java` (role from body → instant ADMIN creation); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup #frontend); `AdminPage.tsx` (role change Mass Assignment #87); `MessagesPage.tsx` (senderId editable in compose form #88) |
+| A06 | Security Misconfiguration / Missing Business Logic | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, CANCELLED → DISPENSED allowed — no state machine #110) |
+| A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body #109); `AdminController.java` (role from body → instant ADMIN creation); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup #frontend); `AdminPage.tsx` (role change Mass Assignment #87); `MessagesPage.tsx` (senderId editable in compose form #88) |
 | A08 | Software and Data Integrity Failures / Resource Exhaustion | `pom.xml` (JJWT CVE-2024-31033), `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `LoggingInterceptor.java` (`ex.printStackTrace(pw)` — full JVM stack trace persisted to DB, CWE-209); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request) |
 | A09 | Security Logging and Monitoring Failures | `AdminController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs; logging errors silently swallowed) |

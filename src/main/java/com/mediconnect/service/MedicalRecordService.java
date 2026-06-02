@@ -160,6 +160,18 @@ public class MedicalRecordService {
                 .collect(Collectors.toList());
     }
 
+    // [A01] No ownership check — any authenticated user can update any medical record.
+    //        Diagnosis and notes (stored in prescription column) are overwritten without
+    //        verifying that the caller is the treating doctor or the patient's guardian.
+    public MedicalRecordDto update(Long id, MedicalRecordDto dto) {
+        MedicalRecord record = medicalRecordRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Medical record not found: " + id));
+        if (dto.getDiagnosis() != null) record.setDiagnosis(dto.getDiagnosis());
+        // notes from frontend maps to the prescription column; null = don't touch, "" = clear
+        if (dto.getNotes() != null) record.setPrescription(dto.getNotes());
+        return toDto(medicalRecordRepository.save(record));
+    }
+
     private MedicalRecordDto toDto(MedicalRecord r) {
         return MedicalRecordDto.builder()
                 .id(r.getId())

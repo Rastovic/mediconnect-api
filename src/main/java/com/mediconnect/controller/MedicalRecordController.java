@@ -48,6 +48,15 @@ public class MedicalRecordController {
         return ResponseEntity.ok(medicalRecordService.findByPatientId(patientId));
     }
 
+    // [A01] No ownership check — any authenticated user can update any medical record.
+    //        No verification that the caller is the treating doctor or patient.
+    @PutMapping("/{id}")
+    public ResponseEntity<MedicalRecordDto> updateRecord(
+            @PathVariable Long id,
+            @RequestBody MedicalRecordDto dto) {
+        return ResponseEntity.ok(medicalRecordService.update(id, dto));
+    }
+
     // [A03] Unrestricted File Upload — no validation of:
     //        - file extension (accepts .php, .jsp, .exe, .sh, ...)
     //        - Content-Type / MIME type (accepts application/octet-stream, text/html, ...)
