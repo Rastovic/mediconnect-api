@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 public class LabResultDto {
     private Long id;
     private Long patientId;
+    private String patientName;
     private Long labTechId;
     private String testName;
     private String resultValue;

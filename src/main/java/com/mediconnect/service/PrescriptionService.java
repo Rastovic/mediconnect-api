@@ -126,12 +126,20 @@ public class PrescriptionService {
                 .stream().map(this::toDto).collect(Collectors.toList());
     }
 
+    // [A01] No access control — returns every prescription in the system
+    public List<PrescriptionDto> findAll() {
+        return prescriptionRepository.findAll()
+                .stream().map(this::toDto).collect(Collectors.toList());
+    }
+
     private PrescriptionDto toDto(Prescription p) {
         return PrescriptionDto.builder()
                 .id(p.getId())
                 .medicalRecordId(p.getMedicalRecord().getId())
                 .patientId(p.getPatient().getId())
+                .patientName(p.getPatient().getUser().getUsername())
                 .doctorId(p.getDoctor().getId())
+                .doctorName(p.getDoctor().getUser().getUsername())
                 .pharmacistId(p.getPharmacist() != null ? p.getPharmacist().getId() : null)
                 .medicationName(p.getMedicationName())
                 .dosage(p.getDosage())

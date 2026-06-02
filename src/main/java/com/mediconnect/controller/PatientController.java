@@ -23,4 +23,17 @@ public class PatientController {
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
+
+    // [A01] No role check — any authenticated user can fetch any patient profile
+    //        by using their own JWT (service resolves from JWT username).
+    @GetMapping("/profile")
+    public ResponseEntity<PatientDto> getMyProfile() {
+        return ResponseEntity.ok(patientService.getMyProfile());
+    }
+
+    // [A01] No role check — any authenticated caller can update patient profile fields.
+    @PutMapping("/profile")
+    public ResponseEntity<PatientDto> updateMyProfile(@RequestBody PatientDto dto) {
+        return ResponseEntity.ok(patientService.updateMyProfile(dto));
+    }
 }

@@ -19,6 +19,12 @@ public class PrescriptionController {
 
     private final PrescriptionService prescriptionService;
 
+    // [A01] No access control — any caller gets all prescriptions
+    @GetMapping
+    public ResponseEntity<List<PrescriptionDto>> getAll() {
+        return ResponseEntity.ok(prescriptionService.findAll());
+    }
+
     @PostMapping
     public ResponseEntity<PrescriptionDto> create(@RequestBody PrescriptionDto dto) {
         return ResponseEntity.status(201).body(prescriptionService.create(dto));

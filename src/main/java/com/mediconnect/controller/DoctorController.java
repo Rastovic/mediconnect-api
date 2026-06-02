@@ -21,4 +21,16 @@ public class DoctorController {
     public ResponseEntity<List<DoctorDto>> listDoctors() {
         return ResponseEntity.ok(doctorService.findAll());
     }
+
+    // [A01] No role check — any authenticated user can call this endpoint.
+    @GetMapping("/profile")
+    public ResponseEntity<DoctorDto> getMyProfile() {
+        return ResponseEntity.ok(doctorService.getMyProfile());
+    }
+
+    // [A01] No role check — any authenticated caller can update doctor profile fields.
+    @PutMapping("/profile")
+    public ResponseEntity<DoctorDto> updateMyProfile(@RequestBody DoctorDto dto) {
+        return ResponseEntity.ok(doctorService.updateMyProfile(dto));
+    }
 }

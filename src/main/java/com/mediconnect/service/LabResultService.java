@@ -62,8 +62,11 @@ public class LabResultService {
         String sql =
                 "SELECT lr.id, lr.patient_id, lr.lab_tech_id, lr.test_name, " +
                 "       lr.result_value, lr.unit, lr.reference_range, lr.status, " +
-                "       lr.test_date, lr.notes, lr.attachment_path " +
+                "       lr.test_date, lr.notes, lr.attachment_path, " +
+                "       up.username AS patient_name " +
                 "FROM lab_results lr " +
+                "JOIN patients p ON lr.patient_id = p.id " +
+                "JOIN users up ON p.user_id = up.id " +
                 "WHERE lr.test_name      LIKE '%" + testName  + "%' " +  // [A05] string injection
                 "AND   lr.reference_range LIKE '%" + testCode  + "%' " + // [A05] string injection
                 "AND   lr.status          LIKE '%" + status    + "%' " + // [A05] string injection
@@ -72,6 +75,7 @@ public class LabResultService {
         return jdbcTemplate.query(sql, (rs, rowNum) -> LabResultDto.builder()
                 .id(rs.getLong("id"))
                 .patientId(rs.getLong("patient_id"))
+                .patientName(rs.getString("patient_name"))
                 .labTechId(rs.getLong("lab_tech_id"))
                 .testName(rs.getString("test_name"))
                 .resultValue(rs.getString("result_value"))
@@ -184,6 +188,7 @@ public class LabResultService {
         return LabResultDto.builder()
                 .id(lr.getId())
                 .patientId(lr.getPatient().getId())
+                .patientName(lr.getPatient().getUser().getUsername())
                 .labTechId(lr.getLabTech().getId())
                 .testName(lr.getTestName())
                 .resultValue(lr.getResultValue())

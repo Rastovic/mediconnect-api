@@ -18,7 +18,9 @@ public class PrescriptionDto {
     private Long id;
     private Long medicalRecordId;
     private Long patientId;
+    private String patientName;
     private Long doctorId;
+    private String doctorName;
     // [A07] Client sets the pharmacist who dispensed the medication
     private Long pharmacistId;
     private String medicationName;

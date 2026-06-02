@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -71,11 +72,7 @@ public class StatsService {
 
         // Sort chronologically and take last 6 months
         List<Map<String, Object>> appointmentsByMonth = byMonth.entrySet().stream()
-            .sorted(Comparator.comparing(e -> {
-                try { return new java.text.SimpleDateFormat("MMM yy", Locale.ENGLISH)
-                        .parse(e.getKey()); }
-                catch (Exception ex) { return new Date(0); }
-            }))
+            .sorted(Comparator.comparing(e -> YearMonth.parse(e.getKey(), monthFmt)))
             .map(e -> {
                 Map<String, Object> point = new LinkedHashMap<>();
                 point.put("month", e.getKey());

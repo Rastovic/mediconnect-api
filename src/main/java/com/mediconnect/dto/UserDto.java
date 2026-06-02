@@ -20,6 +20,9 @@ public class UserDto {
     private Long id;
     private String username;
     private String email;
+    private String firstName;
+    private String lastName;
+    private String phone;
     // [A04] Password hash visible in every API response
     private String passwordHash;
     // [A07] Client can send "role": "ADMIN" on registration or update

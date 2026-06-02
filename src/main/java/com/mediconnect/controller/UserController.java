@@ -34,7 +34,7 @@ public class UserController {
     }
 
     // [A01] IDOR — no ownership check, any authenticated user can update any other user's profile.
-    //        firstName/lastName/phone from the body are silently ignored (no such columns in users table).
+    //        email, firstName, lastName, phone are all persisted (V13 added the columns).
     @PutMapping("/{id}")
     public ResponseEntity<UserDto> updateUser(
             @PathVariable Long id,
@@ -53,6 +53,16 @@ public class UserController {
         // [A01] role taken directly from body — Role.valueOf() will accept any valid enum name
         String role = body.get("role");
         return ResponseEntity.ok(userService.updateRole(id, role));
+    }
+
+    // [A02] No current-password check — caller only needs to supply the new password.
+    //        Combined with [A01] no ownership check, any caller can reset any user's password.
+    @PutMapping("/{id}/password")
+    public ResponseEntity<UserDto> changePassword(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+        String newPassword = body.get("newPassword");
+        return ResponseEntity.ok(userService.changePassword(id, newPassword));
     }
 
     // [A07] Unsafe HTTP method — DELETE operation exposed as GET.

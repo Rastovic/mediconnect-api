@@ -55,7 +55,8 @@ public class MedicalRecordService {
         }
 
         // notes from frontend maps to prescription column
-        String prescriptionValue = dto.getNotes() != null ? dto.getNotes() : dto.getPrescription();
+        String prescriptionValue = (dto.getNotes() != null && !dto.getNotes().isBlank())
+                ? dto.getNotes() : dto.getPrescription();
 
         MedicalRecord record = MedicalRecord.builder()
                 .patient(patient)

@@ -47,4 +47,13 @@ public class User {
 
     // [A04] Exposed — attacker knows the exact time the account unlocks
     private LocalDateTime lockedUntil;
+
+    @Column(length = 80)
+    private String firstName;
+
+    @Column(length = 80)
+    private String lastName;
+
+    @Column(length = 20)
+    private String phone;
 }

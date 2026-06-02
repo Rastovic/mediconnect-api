@@ -1426,12 +1426,93 @@ Message volume patterns reveal peak usage hours; combined with `GET /api/message
 
 ---
 
+## New Endpoints — Session 2 (functional improvements)
+
+The following endpoints were added to support the appointment detail/edit modal, medical records list, conversations list, and profile update. All carry intentional [A01] vulnerabilities consistent with the rest of the branch.
+
+---
+
+### `PUT /api/appointments/{id}` — `AppointmentController`, `AppointmentService`
+
+**92. IDOR — PUT /api/appointments/{id} without ownership check [A01] — `AppointmentController.java`**
+```java
+// [A01] No check that the caller is the patient or doctor on this appointment
+@PutMapping("/{id}")
+public ResponseEntity<?> updateAppointment(@PathVariable Long id, @RequestBody AppointmentDto dto) {
+    return ResponseEntity.ok(appointmentService.update(id, dto));
+}
+```
+Any authenticated (or unauthenticated, given `permitAll()`) caller can modify the `requestedDate`, `notes`, and `status` of any appointment by supplying its ID. No comparison is made between the appointment's `patient_id` / `doctor_id` and the identity in the JWT token.
+
+---
+
+### `GET /api/medical-records` — `MedicalRecordController`, `MedicalRecordService`
+
+**93. Broken Access Control — GET /api/medical-records returns all records to all roles [A01] — `MedicalRecordController.java`**
+```java
+// [A01] No caller identity check — full cross-patient exposure
+@GetMapping
+public ResponseEntity<List<MedicalRecordDto>> getAll() {
+    return ResponseEntity.ok(medicalRecordService.findAll());
+}
+```
+Every medical record in the database — diagnosis, notes/prescription text, attachment path, patient name — is returned to any caller without checking role or ownership. A PHARMACIST, LAB_TECH, or unauthenticated attacker can harvest the complete medical history of all patients with a single request.
+
+---
+
+### `GET /api/messages/conversations?userId=` — `MessageController`, `MessageService`
+
+**94. IDOR — GET /api/messages/conversations userId parameter not verified against JWT [A01] — `MessageController.java`**
+```java
+// [A01] userId is a query parameter — never compared to the authenticated principal
+@GetMapping("/conversations")
+public ResponseEntity<List<ConversationDto>> getConversations(@RequestParam Long userId) {
+    return ResponseEntity.ok(messageService.getConversations(userId));
+}
+```
+A caller can supply any `userId` to retrieve another user's full conversation list, including partner emails, last-message previews, and unread counts. No ownership verification is performed.
+
+---
+
+### `PUT /api/users/{id}` — `UserController`, `UserService`
+
+**95. IDOR — PUT /api/users/{id} updates any user's profile without ownership check [A01] — `UserController.java`**
+```java
+// [A01] Any caller can update any user's profile — no comparison of {id} against JWT subject
+@PutMapping("/{id}")
+public ResponseEntity<UserDto> updateUser(@PathVariable Long id, @RequestBody UserDto dto) {
+    return ResponseEntity.ok(userService.update(id, dto));
+}
+```
+Patient A can update Patient B's email address by calling `PUT /api/users/2` with a crafted body. The endpoint is also reachable without any JWT (SecurityConfig `permitAll()`).
+
+---
+
+### V11 + V12 Flyway Migrations — extended seed data
+
+**96. MD5 seed passwords without salt — V11 and V12 [A02]**
+
+V11 (`V11__extended_seed_data.sql`) and V12 (`V12__rich_seed_data.sql`) insert 8 additional user accounts (patient2, patient3, doctor2, doctor3, labtech1, pharmacist1 and their associated role records). All passwords are hashed with unsalted MD5:
+
+| Username | Password | MD5 hash |
+|---|---|---|
+| `patient2` | `patient123` | `0d107d09f5bbe40cade3de5c71e9e9b7` |
+| `patient3` | `patient123` | `0d107d09f5bbe40cade3de5c71e9e9b7` |
+| `doctor2`  | `doctor123`  | `9c42a1346e333a770904b2a2b37fa7d3` |
+| `doctor3`  | `doctor123`  | `9c42a1346e333a770904b2a2b37fa7d3` |
+| `labtech1` | `labtech123` | `b4a01e79eee4e7a2a4ae1e2a0e0c2e57` |
+| `pharmacist1` | `pharma123` | `35e1e28f6289c6e07c68cb4c15a57e84` |
+
+All values are recoverable via public rainbow tables. The seed also inserts 35+ additional records across appointments, lab results, prescriptions, and messages — all with PII stored as plaintext per V2 schema ([A04]).
+
+---
+
 ## OWASP Category Summary
 
 | ID | Category | Where |
 |---|---|---|
-| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed); `AppointmentController.java` (IDOR); `MedicalRecordController.java` (any doctor for any patient); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check); `AdminController.java` (admin endpoints open to all callers); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86) |
-| A02 | Cryptographic Failures | `application.yaml`, `V10` (MD5 seed), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82) |
+| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed, PUT /users/{id} no ownership check #95); `AppointmentController.java` (IDOR GET, IDOR PUT #92); `MedicalRecordController.java` (any doctor for any patient; GET all records no access control #93); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check, GET /conversations userId not verified #94); `AdminController.java` (admin endpoints open to all callers); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86) |
+| A02 | Cryptographic Failures | `application.yaml`, `V10`/`V11`/`V12` (MD5 seed passwords for all 9 accounts #96), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82) |
 | A03 | Injection / File Upload | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param) |
 | A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For); **Frontend**: `AuthContext.tsx` (JWT + passwordHash in localStorage #76, #79; unverified JWT decode #77); `axiosInstance.ts` (localStorage read on every request #81); `DashboardPage.tsx` (Token Inspector widget #83); `ProfilePage.tsx` (JWT in URL query param on export #85) |
 | A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84) |

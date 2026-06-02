@@ -4,6 +4,7 @@ import com.mediconnect.dto.UserDto;
 import com.mediconnect.entity.User;
 import com.mediconnect.enums.Role;
 import com.mediconnect.repository.UserRepository;
+import com.mediconnect.security.PasswordUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -15,6 +16,7 @@ import java.util.stream.Collectors;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final PasswordUtils passwordUtils;
 
     // [A01] No access control — any caller gets full list of all users
     public List<UserDto> findAll() {
@@ -32,13 +34,29 @@ public class UserService {
     }
 
     // [A01] IDOR — no check that the authenticated caller is the user being updated.
-    //        Any user can update any other user's email by guessing their id.
+    //        Any user can update any other user's profile by guessing their id.
     public UserDto update(Long id, UserDto dto) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found: " + id));
         if (dto.getEmail() != null && !dto.getEmail().isBlank()) {
             user.setEmail(dto.getEmail());
         }
+        if (dto.getFirstName() != null) user.setFirstName(dto.getFirstName());
+        if (dto.getLastName()  != null) user.setLastName(dto.getLastName());
+        if (dto.getPhone()     != null) user.setPhone(dto.getPhone());
+        return toDto(userRepository.save(user));
+    }
+
+    // [A02] No current-password check — caller can change any user's password
+    //        by supplying only the new password. [A01] No ownership check.
+    public UserDto changePassword(Long id, String newPassword) {
+        if (newPassword == null || newPassword.isBlank()) {
+            throw new IllegalArgumentException("newPassword must not be blank");
+        }
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("User not found: " + id));
+        // [A02] MD5 without salt — same weak hashing as registration
+        user.setPasswordHash(passwordUtils.hashPassword(newPassword));
         return toDto(userRepository.save(user));
     }
 
@@ -63,6 +81,9 @@ public class UserService {
                 .id(user.getId())
                 .username(user.getUsername())
                 .email(user.getEmail())
+                .firstName(user.getFirstName())
+                .lastName(user.getLastName())
+                .phone(user.getPhone())
                 .passwordHash(user.getPasswordHash())   // [A04] exposed
                 .role(user.getRole())
                 .active(user.getActive())
