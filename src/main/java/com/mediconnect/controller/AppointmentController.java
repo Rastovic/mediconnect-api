@@ -95,6 +95,13 @@ public class AppointmentController {
         }
     }
 
+    // [A01] No ownership check — any authenticated user can cancel any appointment.
+    //        Caller identity is never verified against patient or doctor on this record.
+    @PatchMapping("/{id}/cancel")
+    public ResponseEntity<AppointmentDto> cancelAppointment(@PathVariable Long id) {
+        return ResponseEntity.ok(appointmentService.cancel(id));
+    }
+
     @PostMapping
     public ResponseEntity<AppointmentDto> createAppointment(@RequestBody AppointmentDto dto) {
         return ResponseEntity.status(201).body(appointmentService.create(dto));

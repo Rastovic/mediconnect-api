@@ -91,6 +91,15 @@ public class AppointmentService {
         return toDto(appointmentRepository.save(appointment));
     }
 
+    // [A01] No ownership check — any authenticated user can cancel any appointment.
+    //        No check that caller is the patient or doctor on this appointment.
+    public AppointmentDto cancel(Long id) {
+        Appointment appointment = appointmentRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Appointment not found: " + id));
+        appointment.setStatus(AppointmentStatus.CANCELLED);
+        return toDto(appointmentRepository.save(appointment));
+    }
+
     // [A01] IDOR — no ownership check. Any authenticated user can update any appointment.
     public AppointmentDto update(Long id, AppointmentDto dto) {
         Appointment appointment = appointmentRepository.findById(id)
