@@ -1,0 +1,67 @@
+SET @p1   = (SELECT id FROM patients WHERE user_id = (SELECT id FROM users WHERE username = 'patient1'));
+SET @u_lt = (SELECT id FROM users WHERE username = 'labtech1');
+
+INSERT INTO lab_results (patient_id, lab_tech_id, test_name, result_value, unit, reference_range, status, test_date, notes) VALUES
+
+(@p1, @u_lt,
+ 'Thyroid Stimulating Hormone (TSH)',
+ '3.8',
+ 'mIU/L',
+ '0.4 – 4.0 mIU/L',
+ 'COMPLETED',
+ '2026-04-20 08:15:00',
+ 'TSH within normal range. No evidence of thyroid dysfunction.'),
+
+(@p1, @u_lt,
+ 'Vitamin D (25-OH)',
+ '18',
+ 'ng/mL',
+ '30 – 100 ng/mL',
+ 'COMPLETED',
+ '2026-04-20 08:20:00',
+ 'Vitamin D deficiency confirmed. Supplementation with 2000 IU/day recommended.'),
+
+(@p1, @u_lt,
+ 'Iron Studies (Serum Ferritin)',
+ '8',
+ 'ng/mL',
+ '12 – 150 ng/mL',
+ 'COMPLETED',
+ '2026-05-05 07:30:00',
+ 'Low ferritin consistent with iron deficiency. Oral iron supplementation initiated.'),
+
+(@p1, @u_lt,
+ 'C-Reactive Protein (CRP)',
+ '0.4',
+ 'mg/L',
+ '< 1.0 mg/L normal, 1–10 mild, > 10 high',
+ 'COMPLETED',
+ '2026-05-05 07:45:00',
+ 'CRP normal. No evidence of acute inflammation.'),
+
+(@p1, @u_lt,
+ 'Comprehensive Metabolic Panel (CMP)',
+ 'Na: 138, K: 4.1, Cl: 101, CO2: 24, Glucose: 92, BUN: 14, Creatinine: 0.8, ALT: 22, AST: 19',
+ 'mEq/L / mg/dL / U/L',
+ 'Na 136–145, K 3.5–5.1, Glucose 70–100, BUN 7–20, Creatinine 0.6–1.1, ALT < 56, AST < 40',
+ 'COMPLETED',
+ '2026-05-11 08:30:00',
+ 'All values within normal limits. Kidney and liver function satisfactory.'),
+
+(@p1, @u_lt,
+ 'HbA1c (Glycated Haemoglobin)',
+ '5.4',
+ '%',
+ '< 5.7 normal, 5.7–6.4 prediabetes, ≥ 6.5 diabetes',
+ 'PENDING',
+ '2026-06-15 07:00:00',
+ 'Routine diabetes screening. Awaiting lab processing.'),
+
+(@p1, @u_lt,
+ 'Full Blood Count (FBC) — Follow-up',
+ 'Hgb: 11.2, MCV: 76, WBC: 6.5, Plt: 265',
+ 'g/dL / fL / 10^9/L',
+ 'Hgb: 12–16, MCV: 80–100, WBC: 4–10, Plt: 150–400',
+ 'PENDING',
+ '2026-06-20 07:00:00',
+ 'Follow-up CBC after 6 weeks of iron supplementation. Haemoglobin improving but still below range.');

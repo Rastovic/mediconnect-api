@@ -1507,15 +1507,144 @@ All values are recoverable via public rainbow tables. The seed also inserts 35+ 
 
 ---
 
+---
+
+## Dashboard Page — Improvements (Session 3)
+
+### Backend — `StatsController`, `StatsService`, `RecentEventDto`
+
+**97. Broken Access Control — GET /api/stats/recent returns all users' activity with no auth filter [A05] — `StatsController.java`, `StatsService.java`**
+```java
+// [A05] No authentication or authorization check — any caller can retrieve all users' activity.
+@GetMapping("/recent")
+public ResponseEntity<List<RecentEventDto>> recent() {
+    return ResponseEntity.ok(statsService.getRecent());
+}
+```
+`StatsService.getRecent()` performs a UNION across appointments, lab results, messages, and prescriptions — returning the 10 most recent events from all users. No ownership filter, no role check. An unauthenticated attacker can observe:
+- Appointment events: which patients visited which doctors and when
+- Lab result events: which tests were ordered for which patients
+- Message events: who communicated with whom (sender + receiver emails)
+- Prescription events: which medications were prescribed to which patients
+
+---
+
+**98. Extended summary exposes system-wide unread message count [A05] — `StatsService.getSummary()`**
+```java
+// [A05] Counts unread messages system-wide — no ownership filter
+long unreadMessages = messageRepository.findAll().stream()
+    .filter(m -> m.getReadAt() == null)
+    .count();
+summary.put("unreadMessages", unreadMessages);
+```
+`GET /api/stats/summary` now returns `unreadMessages` (count of all unread messages in the entire system, regardless of sender/receiver). Any caller — including unauthenticated ones — learns the global unread volume, which can be combined with `GET /api/messages/conversation` IDOR (vuln #57) to time harvesting attacks.
+
+---
+
+### Frontend — `DashboardPage.tsx`, `Sidebar.tsx`
+
+**99. [A04] Role-aware greeting banner exposes user ID in plaintext — `DashboardPage.tsx`**
+```typescript
+// [A04] User ID exposed in UI — IDOR enumeration aid
+<span className="text-[#F85149]">[A04]</span>{' '}
+Logged in as user #{user?.id ?? '—'}
+```
+The greeting banner renders the authenticated user's database primary key (e.g. `Logged in as user #2`) in the UI. An attacker can cross-reference this ID with IDOR endpoints such as `GET /api/users/{id}`, `GET /api/patients/by-user/{id}`, and `PUT /api/users/{id}` to construct targeted attacks without enumeration.
+
+---
+
+**100. [A05] Recent activity feed renders all-users events client-side — `DashboardPage.tsx`**
+```typescript
+// [A05] /stats/recent returns all users' activity — no auth filter server-side
+const { data: recentEvents = [] } = useQuery<RecentEvent[]>({
+  queryKey: ['stats-recent'],
+  queryFn: async () => {
+    const { data } = await api.get<RecentEvent[]>('/stats/recent')
+    return data
+  },
+})
+```
+The dashboard renders the last 10 events from `GET /api/stats/recent` for all authenticated users. A PATIENT user sees events from other patients' appointments, lab results, and prescriptions — cross-patient data exposure without any role or ownership check.
+
+---
+
+**101. [A01] Sidebar unread badge polls all conversations via userId query param — `Sidebar.tsx`**
+```typescript
+// [A01] userId passed as query param — server does not verify against JWT principal
+const { data: conversations = [] } = useQuery<Conversation[]>({
+  queryKey: ['conversations', user?.id],
+  enabled: !!user?.id,
+  refetchInterval: 30000,
+  queryFn: async () => {
+    const { data } = await api.get<Conversation[]>(`/messages/conversations?userId=${user!.id}`)
+    return data
+  },
+})
+```
+The sidebar polls `GET /api/messages/conversations?userId=` every 30 seconds to show an unread message badge. The `userId` parameter is never verified server-side (vuln #94). An attacker who modifies the in-flight request (or directly calls the endpoint) can supply any `userId` to retrieve another user's unread conversation counts.
+
+---
+
+### Role-Based Dashboards (Session 4) — `DashboardPage.tsx`, `StaffDashboardPage.tsx`, `App.tsx`, `Sidebar.tsx`, `LabResultService.java`
+
+**102. [A01] `/staff` route has no role guard — any authenticated user can access it — `App.tsx`**
+```typescript
+// [A01] /staff uses ProtectedRoute WITHOUT requiredRole — any authenticated user
+// (including PATIENT) can navigate directly to /staff and see staff data.
+<Route path="/staff" element={<ProtectedRoute><StaffDashboardPage /></ProtectedRoute>} />
+```
+The `/staff` route is protected only by authentication (JWT must be valid), not by role. A PATIENT who knows the URL can navigate to `/staff` and load the DOCTOR, LAB_TECH, or PHARMACIST dashboard views. The component renders a UI-only unauthorized warning, but the underlying API calls still execute and return data.
+
+---
+
+**103. [A01] Sidebar Dashboard link is role-aware client-side only — no server enforcement — `Sidebar.tsx`**
+```typescript
+// [A01] Dashboard path set client-side by role — no server enforcement.
+//        A patient can still navigate directly to /staff or /admin.
+const dashboardPath = user?.role === 'PATIENT' ? '/dashboard'
+  : user?.role === 'ADMIN' ? '/admin'
+  : '/staff'
+```
+The sidebar redirects each role to its intended dashboard path purely on the client. No server-side route guard or API authorization prevents a PATIENT from visiting `/staff` or `/admin` directly. The "access control" is a UI convenience, not a security boundary.
+
+---
+
+**104. [A01] Patient dashboard fetches all appointments — client-side filter only — `DashboardPage.tsx`**
+```typescript
+// [A01] Client-side filter — backend sends ALL patients' appointments; PATIENT sees them all in network tab
+const myAppointments = appointments.filter(a => a.patientName === username)
+```
+`GET /api/appointments` returns every appointment in the system. The patient dashboard filters by `patientName === username` in the browser. The raw network response containing all other patients' appointment records (names, doctors, dates, statuses) is fully visible in the browser's DevTools Network tab.
+
+---
+
+**105. [A01] Doctor dashboard fetches all appointments — client-side filter — `StaffDashboardPage.tsx`**
+```typescript
+// [A01] Client-side filter — server sends all doctors' appointments; easily bypassed in browser
+const myAppts = appointments.filter(a => a.doctorName === username)
+```
+Same pattern as #104 but for the doctor view. The doctor's browser receives every appointment in the system and filters by their own name. Removing or modifying the filter expression in DevTools reveals all other doctors' schedules.
+
+---
+
+**106. [A01] `GET /lab-results/search` with no patientId returns all patients' results — `LabResultService.java`**
+```java
+// [A01] null patientId → no filter → all patients' results exposed to any caller
+(patientId != null ? "AND lr.patient_id = " + patientId : ""); // [A05] no quotes — UNION-ready
+```
+When `patientId` is omitted from the request, `searchLabResults()` no longer appends the `patient_id` filter clause, returning all lab results system-wide. The endpoint `GET /api/lab-results/search` has no role check — a PATIENT who navigates to `/staff` triggers `LabTechDashboard` which calls this endpoint with no `patientId`, exposing all patients' test names, values, and statuses.
+
+---
+
 ## OWASP Category Summary
 
 | ID | Category | Where |
 |---|---|---|
-| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed, PUT /users/{id} no ownership check #95); `AppointmentController.java` (IDOR GET, IDOR PUT #92); `MedicalRecordController.java` (any doctor for any patient; GET all records no access control #93); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check, GET /conversations userId not verified #94); `AdminController.java` (admin endpoints open to all callers); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86) |
+| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed, PUT /users/{id} no ownership check #95); `AppointmentController.java` (IDOR GET, IDOR PUT #92); `MedicalRecordController.java` (any doctor for any patient; GET all records no access control #93); `LabResultController.java` (IDOR); `MessageController.java` (conversation IDOR, delete without ownership check, GET /conversations userId not verified #94); `AdminController.java` (admin endpoints open to all callers); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); `LabResultService.java` (null patientId → all results exposed #106); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86); `App.tsx` + `StaffDashboardPage.tsx` (/staff route no role guard #102); `Sidebar.tsx` (unread badge userId param not verified #101; role-based dashboard link client-side only #103); `DashboardPage.tsx` (client-side patient filter on appointments #104); `StaffDashboardPage.tsx` (client-side doctor filter on appointments #105) |
 | A02 | Cryptographic Failures | `application.yaml`, `V10`/`V11`/`V12` (MD5 seed passwords for all 9 accounts #96), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82) |
 | A03 | Injection / File Upload | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param) |
-| A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For); **Frontend**: `AuthContext.tsx` (JWT + passwordHash in localStorage #76, #79; unverified JWT decode #77); `axiosInstance.ts` (localStorage read on every request #81); `DashboardPage.tsx` (Token Inspector widget #83); `ProfilePage.tsx` (JWT in URL query param on export #85) |
-| A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84) |
+| A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For); **Frontend**: `AuthContext.tsx` (JWT + passwordHash in localStorage #76, #79; unverified JWT decode #77); `axiosInstance.ts` (localStorage read on every request #81); `DashboardPage.tsx` (Token Inspector widget #83; user ID in greeting banner #99); `ProfilePage.tsx` (JWT in URL query param on export #85) |
+| A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); `StatsController.java` (GET /recent — all users' events with no auth filter #97; unreadMessages system-wide count #98); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84); `DashboardPage.tsx` (recent activity feed renders cross-user events #100) |
 | A06 | Security Misconfiguration / Missing Business Logic | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, any status transition allowed including `CANCELLED → DISPENSED`) |
 | A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body); `AdminController.java` (role from body → instant ADMIN creation); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup #frontend); `AdminPage.tsx` (role change Mass Assignment #87); `MessagesPage.tsx` (senderId editable in compose form #88) |
 | A08 | Software and Data Integrity Failures / Resource Exhaustion | `pom.xml` (JJWT CVE-2024-31033), `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `LoggingInterceptor.java` (`ex.printStackTrace(pw)` — full JVM stack trace persisted to DB, CWE-209); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request) |

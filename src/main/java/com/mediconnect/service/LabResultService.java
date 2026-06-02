@@ -67,10 +67,11 @@ public class LabResultService {
                 "FROM lab_results lr " +
                 "JOIN patients p ON lr.patient_id = p.id " +
                 "JOIN users up ON p.user_id = up.id " +
-                "WHERE lr.test_name      LIKE '%" + testName  + "%' " +  // [A05] string injection
-                "AND   lr.reference_range LIKE '%" + testCode  + "%' " + // [A05] string injection
-                "AND   lr.status          LIKE '%" + status    + "%' " + // [A05] string injection
-                "AND   lr.patient_id = "              + patientId;       // [A05] numeric — no quotes, UNION-ready
+                "WHERE lr.test_name       LIKE '%" + (testName != null ? testName : "") + "%' " + // [A05] string injection
+                "AND   lr.reference_range LIKE '%" + (testCode != null ? testCode : "") + "%' " + // [A05] string injection
+                "AND   lr.status          LIKE '%" + (status   != null ? status   : "") + "%' " + // [A05] string injection
+                // [A01] null patientId → no filter → all patients' results exposed to any caller
+                (patientId != null ? "AND lr.patient_id = " + patientId : ""); // [A05] no quotes — UNION-ready
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> LabResultDto.builder()
                 .id(rs.getLong("id"))
