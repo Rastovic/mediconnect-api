@@ -40,7 +40,8 @@ public class LabResultController {
             @RequestParam(defaultValue = "") String testName,
             @RequestParam(defaultValue = "") String testCode,
             @RequestParam(defaultValue = "") String status,
-            @RequestParam(defaultValue = "0") Long patientId) {
+            // [A01] required=false → null when omitted → service removes patient_id filter → all results exposed
+            @RequestParam(required = false) Long patientId) {
         return ResponseEntity.ok(
                 labResultService.searchLabResults(testName, testCode, status, patientId));
     }
