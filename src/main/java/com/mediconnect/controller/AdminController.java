@@ -91,4 +91,11 @@ public class AdminController {
     public ResponseEntity<List<AuditLogDto>> getLogs() {
         return ResponseEntity.ok(adminService.getAllLogs());
     }
+
+    // [A01] No ADMIN role check — any authenticated user can activate or deactivate any account.
+    //        A PATIENT could deactivate the ADMIN account, locking admins out of the system.
+    @PatchMapping("/users/{id}/toggle")
+    public ResponseEntity<UserDto> toggleUser(@PathVariable Long id) {
+        return ResponseEntity.ok(adminService.toggleUser(id));
+    }
 }

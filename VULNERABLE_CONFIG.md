@@ -1734,16 +1734,161 @@ async function handleExport(r: LabResult) {
 The Export button in the detail modal copies full lab result data (including patient ID and notes) to the clipboard. No server request is made — the data was already loaded client-side without row-level access control. Demonstrates insecure design: sensitive clinical data is available to any authenticated user who can reach the page.
 
 
+---
+
+## Messages Page — Improvements (Section 6)
+
+### Frontend — `MessagesPage.tsx`
+
+**115. [A01] `PATCH /api/messages/{id}/read` — no ownership check — `MessagesPage.tsx`**
+```tsx
+// [A01] PATCH /{id}/read has no ownership check — any user can mark any message as read
+useEffect(() => {
+  if (!messages.length || !user?.id) return
+  const unread = messages.filter(m => !m.read && m.receiverId === user.id)
+  if (!unread.length) return
+  void Promise.all(unread.map(m => api.patch(`/messages/${m.id}/read`)))
+    .then(() => void qc.invalidateQueries({ queryKey: ['conversations', user.id] }))
+}, [messages])
+```
+When a conversation thread is opened, the frontend automatically sends `PATCH /messages/{id}/read` for every unread message. The backend does not verify that the caller is the intended receiver. Any authenticated user who learns a message ID can mark it read — suppressing unread badge counts for a victim without seeing the actual content. Demonstrates A01: Broken Access Control at the sub-resource operation level.
+
+---
+
+**116. [A01] `DELETE /api/messages/{id}` — no ownership check — `MessagesPage.tsx`**
+```tsx
+// [A01] No ownership check — any user can delete any message
+const deleteMutation = useMutation({
+  mutationFn: (id: number) => api.delete(`/messages/${id}`),
+  onSuccess: () => {
+    toast('[A01] Message deleted — no ownership check on server', 'warning')
+  },
+})
+```
+The trash icon appears on hover for every message bubble. Clicking it sends `DELETE /messages/{id}` directly. The server accepts the request without verifying whether the authenticated user is the sender or receiver of that message. An attacker can iterate sequential IDs to permanently delete other users' messages — a classic IDOR via destructive operation.
+
+---
+
+**117. [A07] Inline reply sender spoofing — `replySenderId` from form, not JWT — `MessagesPage.tsx`**
+```tsx
+// [A07] replySenderId is editable — user can impersonate any sender
+const [replySenderId, setReplySenderId] = useState<number>(user?.id ?? 0)
+
+<select
+  value={replySenderId}
+  onChange={(e) => setReplySenderId(Number(e.target.value))}
+>
+  {allUsers.map((u) => (
+    <option key={u.id} value={u.id}>{u.username} — {u.role}</option>
+  ))}
+</select>
+
+replyMutation.mutate({ senderId: replySenderId, receiverId: activeUserId, content: replyContent })
+```
+The inline reply form's "From" field is a `<select>` listing all platform users. `replySenderId` is read directly from the form and sent as `senderId` in the POST body. The server uses that body value to set `message.senderId` without comparing it to the authenticated user's JWT subject. Any user can impersonate any other user in their sent messages — a textbook A07 Mass Assignment / input trust violation.
+
+---
+
+---
+
+## Admin Page — Improvements (Section 7)
+
+### Backend — `AdminController.java`, `AdminService.java`
+
+**118. [A01] `PATCH /api/admin/users/{id}/toggle` — no ADMIN role check — `AdminController.java`, `AdminService.java`**
+```java
+// [A01] No ADMIN role check — any authenticated user can activate or deactivate any account
+@PatchMapping("/users/{id}/toggle")
+public ResponseEntity<UserDto> toggleUser(@PathVariable Long id) {
+    return ResponseEntity.ok(adminService.toggleUser(id));
+}
+
+// [A01] No ownership or role check — any caller can flip any user's active flag
+public UserDto toggleUser(Long id) {
+    User user = userRepository.findById(id).orElseThrow(...);
+    user.setActive(!Boolean.TRUE.equals(user.getActive()));
+    return toDto(userRepository.save(user));
+}
+```
+The toggle endpoint sits under `/api/admin/**` which is `permitAll()` in `SecurityConfig`. Any authenticated user (or unauthenticated caller) can deactivate an ADMIN account, locking legitimate admins out of the system. No JWT subject comparison, no `@PreAuthorize("hasRole('ADMIN')")`.
+
+---
+
+### Frontend — `AdminPage.tsx`
+
+**119. [A07] Create User modal — role freely settable in request body — `AdminPage.tsx`**
+```tsx
+// [A07] role freely settable — [A02] backend stores MD5(password) with no salt
+const createUserMutation = useMutation({
+  mutationFn: (body: typeof createForm) => api.post('/admin/users', body),
+  ...
+})
+
+<Select value={createForm.role} ...>
+  <option value="ADMIN">Administrator</option>  // selectable by any user
+</Select>
+```
+The "+ New User" modal allows any authenticated user to create an account with any role including `ADMIN`. The `role` field is sent in the POST body and the server assigns it without caller-role enforcement. Combined with the `permitAll()` on `/api/admin/**`, the endpoint requires no token at all. Demonstrates A07 Mass Assignment at account creation.
+
+---
+
+**120. [A02] Password field in Create User modal rendered as plain text — `AdminPage.tsx`**
+```tsx
+{/* [A02] plaintext password visible in form field, stored as MD5 with no salt */}
+<Input type="text" placeholder="Stored as MD5(password) with no salt" ... />
+```
+The password input uses `type="text"` (intentionally), so the value is visible in the browser. The backend hashes it with MD5 and no salt. Demonstrates A02: password handling failures at both ends — plaintext in transit and weak hash at rest.
+
+---
+
+**121. [A01] Active/Inactive toggle button — no ADMIN role check — `AdminPage.tsx`**
+```tsx
+// [A01] Toggle — no ADMIN role check on PATCH /admin/users/{id}/toggle
+<button
+  onClick={() => toggleMutation.mutate(u.id)}
+  title="[A01] Toggle active — no ADMIN check on server"
+>
+  {u.active ? 'Active' : 'Inactive'}
+</button>
+```
+Every user row shows a toggle button that calls `PATCH /admin/users/{id}/toggle`. The server does not verify that the caller is ADMIN. A PATIENT can deactivate the ADMIN account. The button's hover state flips green↔red to show the intended new state.
+
+---
+
+**122. [A02] Password hash column — copyable MD5 — `AdminPage.tsx`**
+```tsx
+// [A02] MD5 hash — click to copy — searchable in rainbow tables
+<button onClick={() => copyHash(u)} title="[A02] Click to copy — MD5, no salt, rainbow-table searchable">
+  <span>{u.passwordHash}</span>
+  <Copy size={10} />
+</button>
+```
+Clicking the password hash cell copies the MD5 value to clipboard. A toast annotates the action with `[A02] MD5 hash copied — searchable in rainbow tables`. The hash is already exposed in the GET /admin/users response; copyability reinforces that it can be directly submitted to crackstation.net or hashcat to recover the plaintext.
+
+---
+
+**123. [A09] Audit Log "Clear All Logs" button — no confirmation, no ADMIN check — `AdminPage.tsx`**
+```tsx
+// [A09] Permanently destroys the entire audit trail without authorization
+const clearLogsMutation = useMutation({
+  mutationFn: () => api.post('/admin/logs/clear'),
+  ...
+})
+```
+The "Clear All Logs" button in the Audit Logs tab calls `POST /admin/logs/clear` immediately with no confirmation dialog. The server deletes all rows with no authorization check, no backup, and no soft-delete. Paired with the A09 annotation banner in the tab header. The previous implementation added a `confirm()` dialog — this version removes it to demonstrate that a single click destroys the entire forensic timeline.
+
+---
+
 ## OWASP Category Summary
 
 | ID | Category | Where |
 |---|---|---|
-| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed, PUT /users/{id} no ownership check #95); `AppointmentController.java` (IDOR GET, IDOR PUT #92); `MedicalRecordController.java` (any doctor for any patient; GET all records no access control #93; PUT /{id} no ownership check #107); `LabResultController.java` (IDOR; null patientId → all results exposed #113); `MessageController.java` (conversation IDOR, delete without ownership check, GET /conversations userId not verified #94); `AdminController.java` (admin endpoints open to all callers); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); `LabResultService.java` (null patientId → all results exposed #106); `PrescriptionController.java` (dispense no role check #108); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86); `App.tsx` + `StaffDashboardPage.tsx` (/staff route no role guard #102); `Sidebar.tsx` (unread badge userId param not verified #101; role-based dashboard link client-side only #103); `DashboardPage.tsx` (client-side patient filter on appointments #104); `StaffDashboardPage.tsx` (client-side doctor filter on appointments #105); `MedicalRecordsPage.tsx` (Edit button all roles #111; Dispense button all roles #112) |
-| A02 | Cryptographic Failures | `application.yaml`, `V10`/`V11`/`V12` (MD5 seed passwords for all 9 accounts #96), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82) |
+| A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed, PUT /users/{id} no ownership check #95); `AppointmentController.java` (IDOR GET, IDOR PUT #92); `MedicalRecordController.java` (any doctor for any patient; GET all records no access control #93; PUT /{id} no ownership check #107); `LabResultController.java` (IDOR; null patientId → all results exposed #113); `MessageController.java` (conversation IDOR, delete without ownership check, GET /conversations userId not verified #94; PATCH /{id}/read no ownership check #115; DELETE /{id} no ownership check #116); `AdminController.java` (admin endpoints open to all callers; PATCH /users/{id}/toggle no ADMIN check #118); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); `LabResultService.java` (null patientId → all results exposed #106); `PrescriptionController.java` (dispense no role check #108); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86); `App.tsx` + `StaffDashboardPage.tsx` (/staff route no role guard #102); `Sidebar.tsx` (unread badge userId param not verified #101; role-based dashboard link client-side only #103); `DashboardPage.tsx` (client-side patient filter on appointments #104); `StaffDashboardPage.tsx` (client-side doctor filter on appointments #105); `MedicalRecordsPage.tsx` (Edit button all roles #111; Dispense button all roles #112); `AdminPage.tsx` (active toggle no ADMIN check #121) |
+| A02 | Cryptographic Failures | `application.yaml`, `V10`/`V11`/`V12` (MD5 seed passwords for all 9 accounts #96), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82); `AdminPage.tsx` (password field type="text" in create modal #120; MD5 hash copyable in user table #122) |
 | A03 | Injection / File Upload | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param) |
 | A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For); **Frontend**: `AuthContext.tsx` (JWT + passwordHash in localStorage #76, #79; unverified JWT decode #77); `axiosInstance.ts` (localStorage read on every request #81); `DashboardPage.tsx` (Token Inspector widget #83; user ID in greeting banner #99); `ProfilePage.tsx` (JWT in URL query param on export #85); `LabResultsPage.tsx` (export to clipboard includes patient ID without access check #114) |
 | A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); `StatsController.java` (GET /recent — all users' events with no auth filter #97; unreadMessages system-wide count #98); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84); `DashboardPage.tsx` (recent activity feed renders cross-user events #100) |
 | A06 | Security Misconfiguration / Missing Business Logic | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, CANCELLED → DISPENSED allowed — no state machine #110) |
-| A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body #109); `AdminController.java` (role from body → instant ADMIN creation); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup #frontend); `AdminPage.tsx` (role change Mass Assignment #87); `MessagesPage.tsx` (senderId editable in compose form #88) |
+| A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body #109); `AdminController.java` (role from body → instant ADMIN creation); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup #frontend); `AdminPage.tsx` (role change Mass Assignment #87; create user role from body #119); `MessagesPage.tsx` (senderId editable in compose form #88; replySenderId editable in inline reply — impersonate any user #117) |
 | A08 | Software and Data Integrity Failures / Resource Exhaustion | `pom.xml` (JJWT CVE-2024-31033), `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `LoggingInterceptor.java` (`ex.printStackTrace(pw)` — full JVM stack trace persisted to DB, CWE-209); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request) |
-| A09 | Security Logging and Monitoring Failures | `AdminController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs; logging errors silently swallowed) |
+| A09 | Security Logging and Monitoring Failures | `AdminController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs; logging errors silently swallowed); `AdminPage.tsx` (Clear All Logs button fires immediately with no confirmation — single click destroys forensic timeline #123) |

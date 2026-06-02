@@ -116,6 +116,15 @@ public class AdminService {
         return (int) count;
     }
 
+    // [A01] No ownership or role check — any caller can flip any user's active flag.
+    //        A PATIENT can disable the ADMIN account; no JWT role is inspected.
+    public UserDto toggleUser(Long id) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("User not found: " + id));
+        user.setActive(!Boolean.TRUE.equals(user.getActive()));
+        return toDto(userRepository.save(user));
+    }
+
     public List<AuditLogDto> getAllLogs() {
         // [A01] No role check — any caller can read the full audit trail
         return auditLogRepository.findAll()
