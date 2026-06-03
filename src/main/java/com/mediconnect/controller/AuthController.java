@@ -73,6 +73,8 @@ public class AuthController {
         userMap.put("id", user.getId());
         userMap.put("email", user.getEmail());
         userMap.put("username", user.getUsername());
+        userMap.put("firstName", user.getFirstName());
+        userMap.put("lastName", user.getLastName());
         userMap.put("role", user.getRole().name());
         // [A04] passwordHash intentionally included — visible to client-side JavaScript
         userMap.put("passwordHash", user.getPasswordHash());

@@ -172,13 +172,18 @@ public class MedicalRecordService {
         return toDto(medicalRecordRepository.save(record));
     }
 
+    private static String fullName(com.mediconnect.entity.User u) {
+        String f = u.getFirstName(), l = u.getLastName();
+        return (f != null && !f.isBlank() && l != null && !l.isBlank()) ? f + " " + l : u.getUsername();
+    }
+
     private MedicalRecordDto toDto(MedicalRecord r) {
         return MedicalRecordDto.builder()
                 .id(r.getId())
                 .patientId(r.getPatient().getId())
                 .doctorId(r.getDoctor().getId())
-                .patientName(r.getPatient().getUser().getUsername())
-                .doctorName(r.getDoctor().getUser().getUsername())
+                .patientName(fullName(r.getPatient().getUser()))
+                .doctorName(fullName(r.getDoctor().getUser()))
                 .appointmentId(r.getAppointment() != null ? r.getAppointment().getId() : null)
                 .diagnosis(r.getDiagnosis())
                 .prescription(r.getPrescription())

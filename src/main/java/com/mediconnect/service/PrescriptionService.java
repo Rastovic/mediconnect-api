@@ -132,14 +132,19 @@ public class PrescriptionService {
                 .stream().map(this::toDto).collect(Collectors.toList());
     }
 
+    private static String fullName(User u) {
+        String f = u.getFirstName(), l = u.getLastName();
+        return (f != null && !f.isBlank() && l != null && !l.isBlank()) ? f + " " + l : u.getUsername();
+    }
+
     private PrescriptionDto toDto(Prescription p) {
         return PrescriptionDto.builder()
                 .id(p.getId())
                 .medicalRecordId(p.getMedicalRecord().getId())
                 .patientId(p.getPatient().getId())
-                .patientName(p.getPatient().getUser().getUsername())
+                .patientName(fullName(p.getPatient().getUser()))
                 .doctorId(p.getDoctor().getId())
-                .doctorName(p.getDoctor().getUser().getUsername())
+                .doctorName(fullName(p.getDoctor().getUser()))
                 .pharmacistId(p.getPharmacist() != null ? p.getPharmacist().getId() : null)
                 .medicationName(p.getMedicationName())
                 .dosage(p.getDosage())

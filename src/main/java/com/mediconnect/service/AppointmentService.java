@@ -40,14 +40,15 @@ public class AppointmentService {
         // [A05] SQL Injection — doctorName concatenated directly into the query string.
         String sql = "SELECT a.id, a.patient_id, a.doctor_id, a.status, " +
                      "       a.requested_date, a.notes, a.created_at, " +
-                     "       up.username AS patient_name, ud.username AS doctor_name " +
+                     "       CONCAT(up.first_name, ' ', up.last_name) AS patient_name, " +
+                     "       CONCAT(ud.first_name, ' ', ud.last_name) AS doctor_name " +
                      "FROM appointments a " +
                      "JOIN doctors d  ON a.doctor_id  = d.id " +
                      "JOIN users ud   ON d.user_id    = ud.id " +
                      "JOIN patients p ON a.patient_id = p.id " +
                      "JOIN users up   ON p.user_id    = up.id " +
                      // [A05] raw string concatenation — no PreparedStatement placeholder
-                     "WHERE ud.username LIKE '%" + doctorName + "%'";
+                     "WHERE ud.last_name LIKE '%" + doctorName + "%'";
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             LocalDateTime requestedDate = rs.getObject("requested_date", LocalDateTime.class);
@@ -220,13 +221,18 @@ public class AppointmentService {
         return pdf.getBytes();
     }
 
+    private static String fullName(User u) {
+        String f = u.getFirstName(), l = u.getLastName();
+        return (f != null && !f.isBlank() && l != null && !l.isBlank()) ? f + " " + l : u.getUsername();
+    }
+
     private AppointmentDto toDto(Appointment a) {
         return AppointmentDto.builder()
                 .id(a.getId())
                 .patientId(a.getPatient().getId())
                 .doctorId(a.getDoctor().getId())
-                .patientName(a.getPatient().getUser().getUsername())
-                .doctorName(a.getDoctor().getUser().getUsername())
+                .patientName(fullName(a.getPatient().getUser()))
+                .doctorName(fullName(a.getDoctor().getUser()))
                 .status(a.getStatus())
                 .requestedDate(a.getRequestedDate())
                 .scheduledAt(a.getRequestedDate())

@@ -63,7 +63,7 @@ public class LabResultService {
                 "SELECT lr.id, lr.patient_id, lr.lab_tech_id, lr.test_name, " +
                 "       lr.result_value, lr.unit, lr.reference_range, lr.status, " +
                 "       lr.test_date, lr.notes, lr.attachment_path, " +
-                "       up.username AS patient_name " +
+                "       CONCAT(up.first_name, ' ', up.last_name) AS patient_name " +
                 "FROM lab_results lr " +
                 "JOIN patients p ON lr.patient_id = p.id " +
                 "JOIN users up ON p.user_id = up.id " +
@@ -185,11 +185,16 @@ public class LabResultService {
                 .stream().map(this::toDto).collect(Collectors.toList());
     }
 
+    private static String fullName(User u) {
+        String f = u.getFirstName(), l = u.getLastName();
+        return (f != null && !f.isBlank() && l != null && !l.isBlank()) ? f + " " + l : u.getUsername();
+    }
+
     private LabResultDto toDto(LabResult lr) {
         return LabResultDto.builder()
                 .id(lr.getId())
                 .patientId(lr.getPatient().getId())
-                .patientName(lr.getPatient().getUser().getUsername())
+                .patientName(fullName(lr.getPatient().getUser()))
                 .labTechId(lr.getLabTech().getId())
                 .testName(lr.getTestName())
                 .resultValue(lr.getResultValue())
