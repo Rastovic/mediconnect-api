@@ -19,9 +19,15 @@ import java.time.LocalDateTime;
 public class RefillRequestDto {
     private Long id;
     private Long prescriptionId;
+    // human-readable label for the prescribed medication
+    private String medicationName;
     private Long patientId;
+    // patient's first + last name (falls back to username)
+    private String patientName;
     // [A07] caller-supplied actor — preserved in responses for the audit demo
     private Long requestedBy;
+    // resolved name of the requester (informational only — does NOT enforce auth)
+    private String requestedByName;
     // [A10] nullable on purpose — triggers validator NPE downstream
     private Integer quantity;
     private RefillStatus status;
@@ -32,9 +38,12 @@ public class RefillRequestDto {
     private LocalDateTime createdAt;
     private LocalDateTime dispensedAt;
     private Long pharmacistId;
+    private String pharmacistName;
     // [A10][A09] absolute filesystem path leaked to the API caller
     private String tempSlipPath;
 
+    // Bare conversion — names left null. RefillQueueService.toDto fills them in
+    //        once the lookup repositories are available.
     public static RefillRequestDto from(RefillRequest r) {
         return RefillRequestDto.builder()
                 .id(r.getId())

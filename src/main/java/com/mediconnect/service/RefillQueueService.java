@@ -2,9 +2,15 @@ package com.mediconnect.service;
 
 import com.mediconnect.dto.RefillCreateDto;
 import com.mediconnect.dto.RefillRequestDto;
+import com.mediconnect.entity.Patient;
+import com.mediconnect.entity.Prescription;
 import com.mediconnect.entity.RefillRequest;
+import com.mediconnect.entity.User;
 import com.mediconnect.enums.RefillStatus;
+import com.mediconnect.repository.PatientRepository;
+import com.mediconnect.repository.PrescriptionRepository;
 import com.mediconnect.repository.RefillRequestRepository;
+import com.mediconnect.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,6 +38,9 @@ import java.util.List;
 public class RefillQueueService {
 
     private final RefillRequestRepository refills;
+    private final PrescriptionRepository  prescriptions;
+    private final PatientRepository       patients;
+    private final UserRepository          users;
     private final EligibilityValidator    eligibility;
     private final SlipPrinter             slipPrinter;
 
@@ -49,7 +58,7 @@ public class RefillQueueService {
                 .retryCount(0)
                 .createdAt(LocalDateTime.now())
                 .build();
-        return RefillRequestDto.from(refills.save(r));
+        return toDto(refills.save(r));
     }
 
     // [A10] CWE-755 — Improper handling of exceptional conditions.
@@ -141,7 +150,7 @@ public class RefillQueueService {
         r.setStatus(RefillStatus.DISPENSED);
         r.setPharmacistId(pharmacistId);             // [A07] body-supplied actor
         r.setDispensedAt(LocalDateTime.now());
-        return RefillRequestDto.from(refills.save(r));
+        return toDto(refills.save(r));
     }
 
     // [A10] CWE-400 — No maximum retry guard. Each retry creates a new temp slip
@@ -154,28 +163,67 @@ public class RefillQueueService {
         r.setStatus(RefillStatus.REQUESTED);
         refills.save(r);
         processOne(r);                                // fail-open chain re-runs
-        return RefillRequestDto.from(r);
+        return toDto(r);
     }
 
     // [A01] No access control — returns every refill in the system to any caller.
     // [A10][A09] failureReason + tempSlipPath leaked through the DTO.
     public List<RefillRequestDto> list() {
-        return refills.findAll().stream().map(RefillRequestDto::from).toList();
+        return refills.findAll().stream().map(this::toDto).toList();
     }
 
     // [A01] No ownership check — caller may be any user (or anonymous).
     public List<RefillRequestDto> listForPatient(Long patientId) {
-        return refills.findByPatientId(patientId).stream().map(RefillRequestDto::from).toList();
+        return refills.findByPatientId(patientId).stream().map(this::toDto).toList();
     }
 
     // [A01] No access control on individual fetch.
     public RefillRequestDto findById(Long id) {
-        return RefillRequestDto.from(refills.findById(id)
+        return toDto(refills.findById(id)
                 .orElseThrow(() -> new RuntimeException("RefillRequest not found: " + id)));
     }
 
     // [A01] No ownership check — anyone can delete any refill request.
     public void delete(Long id) {
         refills.deleteById(id);
+    }
+
+    // Enrich the DTO with human-readable names looked up from the related rows.
+    //        The lookups are best-effort — a missing row returns a null name and
+    //        the frontend falls back to displaying the id.
+    private RefillRequestDto toDto(RefillRequest r) {
+        RefillRequestDto dto = RefillRequestDto.from(r);
+
+        if (r.getPrescriptionId() != null) {
+            prescriptions.findById(r.getPrescriptionId())
+                    .map(Prescription::getMedicationName)
+                    .ifPresent(dto::setMedicationName);
+        }
+        if (r.getPatientId() != null) {
+            patients.findById(r.getPatientId())
+                    .map(p -> displayName(p.getUser()))
+                    .ifPresent(dto::setPatientName);
+        }
+        if (r.getRequestedBy() != null) {
+            users.findById(r.getRequestedBy())
+                    .map(RefillQueueService::displayName)
+                    .ifPresent(dto::setRequestedByName);
+        }
+        if (r.getPharmacistId() != null) {
+            users.findById(r.getPharmacistId())
+                    .map(RefillQueueService::displayName)
+                    .ifPresent(dto::setPharmacistName);
+        }
+        return dto;
+    }
+
+    private static String displayName(User u) {
+        if (u == null) return null;
+        String f = u.getFirstName();
+        String l = u.getLastName();
+        if (f != null && !f.isBlank() && l != null && !l.isBlank()) {
+            return f + " " + l;
+        }
+        return u.getUsername();
     }
 }

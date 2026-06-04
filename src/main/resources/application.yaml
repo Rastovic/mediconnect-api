@@ -23,6 +23,8 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
+    # Checksum mismatches from comment-only edits (OWASP 2021 → 2025 renumbering)
+    # are repaired on every startup by FlywayConfig.repairAndMigrate().
 
   servlet:
     multipart:
