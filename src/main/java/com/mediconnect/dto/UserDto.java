@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 // [A07] Mass Assignment: same DTO used for both request and response.
 //        Client can send passwordHash, role, active, failedLoginAttempts
 //        and directly influence account privileges and state.
-// [A04] passwordHash returned in response — no @JsonIgnore.
+// [A06] passwordHash returned in response — no @JsonIgnore.
 @Data
 @Builder
 @NoArgsConstructor
@@ -23,7 +23,7 @@ public class UserDto {
     private String firstName;
     private String lastName;
     private String phone;
-    // [A04] Password hash visible in every API response
+    // [A06] Password hash visible in every API response
     private String passwordHash;
     // [A07] Client can send "role": "ADMIN" on registration or update
     private Role role;

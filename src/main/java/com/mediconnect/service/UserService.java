@@ -47,7 +47,7 @@ public class UserService {
         return toDto(userRepository.save(user));
     }
 
-    // [A02] No current-password check — caller can change any user's password
+    // [A04] No current-password check — caller can change any user's password
     //        by supplying only the new password. [A01] No ownership check.
     public UserDto changePassword(Long id, String newPassword) {
         if (newPassword == null || newPassword.isBlank()) {
@@ -55,7 +55,7 @@ public class UserService {
         }
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found: " + id));
-        // [A02] MD5 without salt — same weak hashing as registration
+        // [A04] MD5 without salt — same weak hashing as registration
         user.setPasswordHash(passwordUtils.hashPassword(newPassword));
         return toDto(userRepository.save(user));
     }
@@ -75,7 +75,7 @@ public class UserService {
         userRepository.deleteById(id);
     }
 
-    // [A04] passwordHash mapped into response DTO — no @JsonIgnore, no masking
+    // [A06] passwordHash mapped into response DTO — no @JsonIgnore, no masking
     private UserDto toDto(User user) {
         return UserDto.builder()
                 .id(user.getId())
@@ -84,7 +84,7 @@ public class UserService {
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
                 .phone(user.getPhone())
-                .passwordHash(user.getPasswordHash())   // [A04] exposed
+                .passwordHash(user.getPasswordHash())   // [A06] exposed
                 .role(user.getRole())
                 .active(user.getActive())
                 .createdAt(user.getCreatedAt())

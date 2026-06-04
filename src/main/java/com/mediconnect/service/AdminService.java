@@ -48,7 +48,7 @@ public class AdminService {
     //    This endpoint is under /api/admin/** which SecurityConfig maps to permitAll(),
     //    so the attacker does not even need a valid JWT token.
     //
-    // [A04] Password hashed with MD5 (no salt) via PasswordUtils.hashPassword().
+    // [A06] Password hashed with MD5 (no salt) via PasswordUtils.hashPassword().
     public UserDto createUser(Map<String, String> body) {
         // [A07] role taken verbatim from the request body — no whitelist, no role enforcement
         String rawRole = body.getOrDefault("role", "PATIENT");
@@ -66,7 +66,7 @@ public class AdminService {
         return toDto(userRepository.save(user));
     }
 
-    // [A02] Cryptographic / Sensitive Data Exposure — returns the complete set of
+    // [A04] Cryptographic / Sensitive Data Exposure — returns the complete set of
     //        resolved Spring Environment properties, including:
     //          spring.datasource.password  → database root password
     //          spring.datasource.url       → internal DB host and schema name
@@ -79,7 +79,7 @@ public class AdminService {
     public Map<String, Object> getConfig(AbstractEnvironment environment) {
         Map<String, Object> props = new LinkedHashMap<>();
 
-        // [A02] Iterates all property sources — includes application.yaml,
+        // [A04] Iterates all property sources — includes application.yaml,
         //        system environment variables, JVM system properties, and
         //        any Spring Cloud Config / Vault values if present.
         environment.getPropertySources().stream()
@@ -91,7 +91,7 @@ public class AdminService {
         return props;
     }
 
-    // [A09] Security Logging and Monitoring Failures — permanently destroys the entire
+    // [A09] Security Logging and Alerting Failures — permanently destroys the entire
     //        audit trail without any authorization check, confirmation step, or backup.
     //
     //  What is lost:
@@ -148,7 +148,7 @@ public class AdminService {
                 .id(u.getId())
                 .username(u.getUsername())
                 .email(u.getEmail())
-                // [A04] passwordHash included — no @JsonIgnore
+                // [A06] passwordHash included — no @JsonIgnore
                 .passwordHash(u.getPasswordHash())
                 .role(u.getRole())
                 .active(u.getActive())

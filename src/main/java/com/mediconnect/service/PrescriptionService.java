@@ -29,7 +29,7 @@ public class PrescriptionService {
     private final DoctorRepository doctorRepository;
     private final UserRepository userRepository;
 
-    // [A06] Missing state machine — a prescription can be dispensed regardless
+    // [A02] Missing state machine — a prescription can be dispensed regardless
     //        of its current status. No guard against double dispensing or dispensing
     //        a cancelled prescription.
     //
@@ -51,12 +51,12 @@ public class PrescriptionService {
         Prescription prescription = prescriptionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Prescription not found: " + id));
 
-        // [A06] Missing: status guard before dispensing
-        // [A06] No check that the caller actually holds the PHARMACIST role
+        // [A02] Missing: status guard before dispensing
+        // [A02] No check that the caller actually holds the PHARMACIST role
         User pharmacist = userRepository.findById(pharmacistId)
                 .orElseThrow(() -> new RuntimeException("Pharmacist not found: " + pharmacistId));
 
-        // [A06] Overwrites dispensedAt even if already DISPENSED
+        // [A02] Overwrites dispensedAt even if already DISPENSED
         prescription.setStatus(PrescriptionStatus.DISPENSED);
         prescription.setPharmacist(pharmacist);
         prescription.setDispensedAt(LocalDateTime.now());
@@ -64,7 +64,7 @@ public class PrescriptionService {
         return toDto(prescriptionRepository.save(prescription));
     }
 
-    // [A06] No state machine validation — any status transition is accepted and
+    // [A02] No state machine validation — any status transition is accepted and
     //        written directly without checking the current state.
     //
     //  Illegal transitions this enables:
@@ -78,13 +78,13 @@ public class PrescriptionService {
         Prescription prescription = prescriptionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Prescription not found: " + id));
 
-        // [A06] PrescriptionStatus.valueOf() accepts any valid enum string
+        // [A02] PrescriptionStatus.valueOf() accepts any valid enum string
         //        without validating the current state or the allowed transition graph
         prescription.setStatus(PrescriptionStatus.valueOf(status));
 
         if (PrescriptionStatus.valueOf(status) == PrescriptionStatus.DISPENSED
                 && prescription.getDispensedAt() == null) {
-            // [A06] dispensedAt is only set if not already present —
+            // [A02] dispensedAt is only set if not already present —
             //        but the status change happens unconditionally regardless
             prescription.setDispensedAt(LocalDateTime.now());
         }

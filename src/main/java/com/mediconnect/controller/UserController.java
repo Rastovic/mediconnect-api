@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 // [A01] No @PreAuthorize or role check anywhere in this controller.
-// [A04] passwordHash field included in every response via UserDto.
+// [A06] passwordHash field included in every response via UserDto.
 @RestController
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
@@ -27,7 +27,7 @@ public class UserController {
 
     // [A01] IDOR — no check that the authenticated user is allowed to read this id.
     //        Patient A can fetch Patient B's profile, including passwordHash.
-    // [A04] Response includes passwordHash in plain text.
+    // [A06] Response includes passwordHash in plain text.
     @GetMapping("/{id}")
     public ResponseEntity<UserDto> getUserById(@PathVariable Long id) {
         return ResponseEntity.ok(userService.findById(id));
@@ -55,7 +55,7 @@ public class UserController {
         return ResponseEntity.ok(userService.updateRole(id, role));
     }
 
-    // [A02] No current-password check — caller only needs to supply the new password.
+    // [A04] No current-password check — caller only needs to supply the new password.
     //        Combined with [A01] no ownership check, any caller can reset any user's password.
     @PutMapping("/{id}/password")
     public ResponseEntity<UserDto> changePassword(

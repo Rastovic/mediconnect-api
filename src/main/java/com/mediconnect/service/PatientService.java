@@ -55,7 +55,7 @@ public class PatientService {
         return PatientDto.builder()
                 .id(p.getId())
                 .userId(p.getUser().getId())
-                // [A04] PII returned in plaintext — insurance number, DOB, blood type, allergies
+                // [A06] PII returned in plaintext — insurance number, DOB, blood type, allergies
                 .insuranceNumber(p.getInsuranceNumber())
                 .dateOfBirth(p.getDateOfBirth())
                 .bloodType(p.getBloodType())

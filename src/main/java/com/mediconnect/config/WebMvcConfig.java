@@ -15,7 +15,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     // Register LoggingInterceptor for every incoming request.
     // No path exclusions — even /api/auth/login (which carries plaintext passwords
     // in the request body) is intercepted and its payload stored in audit_logs.
-    // [A04][A09] There is no allowlist of "safe" paths to skip sensitive-data capture.
+    // [A06][A09] There is no allowlist of "safe" paths to skip sensitive-data capture.
     //
     // Body capture is provided by ContentCachingFilter (@Component, @Order(1)),
     // which wraps every request/response without a size limit [A08 CWE-400].

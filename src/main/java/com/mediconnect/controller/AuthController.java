@@ -16,7 +16,7 @@ import java.util.Map;
 
 // [A07] No @Valid on request body — input is not even syntactically validated.
 // [A07] No rate limiting on any endpoint.
-// [A04] JWT returned in response body — accessible to JavaScript, vulnerable to XSS theft.
+// [A06] JWT returned in response body — accessible to JavaScript, vulnerable to XSS theft.
 //        Correct approach: HttpOnly cookie with Secure and SameSite=Strict flags.
 @RestController
 @RequestMapping("/api/auth")
@@ -34,7 +34,7 @@ public class AuthController {
         try {
             User user = authService.register(request);
             String token = jwtUtil.generateToken(new UserPrincipal(user));
-            // [A04] JWT in JSON response body — not in an HttpOnly cookie
+            // [A06] JWT in JSON response body — not in an HttpOnly cookie
             return ResponseEntity
                     .status(HttpStatus.CREATED)
                     .body(buildAuthResponse(token, user));
@@ -57,7 +57,7 @@ public class AuthController {
         try {
             User user = authService.login(request);
             String token = jwtUtil.generateToken(new UserPrincipal(user));
-            // [A04] JWT in JSON response body — not in an HttpOnly cookie
+            // [A06] JWT in JSON response body — not in an HttpOnly cookie
             return ResponseEntity.ok(buildAuthResponse(token, user));
         } catch (RuntimeException e) {
             // [A07] Original error message forwarded without any generalization
@@ -67,7 +67,7 @@ public class AuthController {
         }
     }
 
-    // [A04] passwordHash included in auth response — exposed to any JS reading the response
+    // [A06] passwordHash included in auth response — exposed to any JS reading the response
     private Map<String, Object> buildAuthResponse(String token, User user) {
         Map<String, Object> userMap = new LinkedHashMap<>();
         userMap.put("id", user.getId());
@@ -76,7 +76,7 @@ public class AuthController {
         userMap.put("firstName", user.getFirstName());
         userMap.put("lastName", user.getLastName());
         userMap.put("role", user.getRole().name());
-        // [A04] passwordHash intentionally included — visible to client-side JavaScript
+        // [A06] passwordHash intentionally included — visible to client-side JavaScript
         userMap.put("passwordHash", user.getPasswordHash());
 
         Map<String, Object> response = new LinkedHashMap<>();

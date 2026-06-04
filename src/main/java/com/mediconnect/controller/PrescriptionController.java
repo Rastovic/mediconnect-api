@@ -9,8 +9,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
-// [A06] PUT /{id}/dispense — no check that the prescription is not already DISPENSED.
-// [A06] PUT /{id}/status  — any status transition accepted, including CANCELLED → DISPENSED.
+// [A02] PUT /{id}/dispense — no check that the prescription is not already DISPENSED.
+// [A02] PUT /{id}/status  — any status transition accepted, including CANCELLED → DISPENSED.
 // [A01] No role enforcement — a PATIENT can call dispense or change status.
 @RestController
 @RequestMapping("/api/prescriptions")
@@ -42,7 +42,7 @@ public class PrescriptionController {
         return ResponseEntity.ok(prescriptionService.findByPatientId(patientId));
     }
 
-    // [A06] Security Misconfiguration / Missing State Machine:
+    // [A02] Security Misconfiguration / Missing State Machine:
     //        No guard against dispensing a prescription that is already DISPENSED or CANCELLED.
     //
     //        Allowed business transition:  CREATED → DISPENSED (once)
@@ -62,7 +62,7 @@ public class PrescriptionController {
         return ResponseEntity.ok(prescriptionService.dispense(id, pharmacistId));
     }
 
-    // [A06] No state machine validation — any status string is accepted and written
+    // [A02] No state machine validation — any status string is accepted and written
     //        directly to the prescription without checking the current state.
     //
     //        Illegal transitions this allows:

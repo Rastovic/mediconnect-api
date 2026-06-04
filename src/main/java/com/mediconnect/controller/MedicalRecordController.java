@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 // [A01] No @PreAuthorize — doctor identity never verified against patient assignment.
-// [A03] File upload and download endpoints are Path Traversal and unrestricted upload vectors.
+// [A05] File upload and download endpoints are Path Traversal and unrestricted upload vectors.
 // [A08] No content_hash computed at upload, not verified at download.
 @RestController
 @RequestMapping("/api/medical-records")
@@ -57,13 +57,13 @@ public class MedicalRecordController {
         return ResponseEntity.ok(medicalRecordService.update(id, dto));
     }
 
-    // [A03] Unrestricted File Upload — no validation of:
+    // [A05] Unrestricted File Upload — no validation of:
     //        - file extension (accepts .php, .jsp, .exe, .sh, ...)
     //        - Content-Type / MIME type (accepts application/octet-stream, text/html, ...)
     //        - file size (no maximum enforced here)
     //        - file content (no magic-byte check)
     //
-    // [A03] Path Traversal write — getOriginalFilename() is attacker-controlled.
+    // [A05] Path Traversal write — getOriginalFilename() is attacker-controlled.
     //        filename = "../../etc/cron.d/backdoor" writes outside uploadDir.
     //
     // [A08] No content_hash computed or stored — integrity of uploaded file is unverifiable.
@@ -72,11 +72,11 @@ public class MedicalRecordController {
             @PathVariable Long id,
             @RequestPart("file") MultipartFile file) throws IOException {
         String storedPath = medicalRecordService.uploadAttachment(id, file);
-        // [A02] Full filesystem path returned to client — leaks server directory structure
+        // [A04] Full filesystem path returned to client — leaks server directory structure
         return ResponseEntity.ok(Map.of("path", storedPath));
     }
 
-    // [A03] Path Traversal read — 'filePath' query parameter is used verbatim
+    // [A05] Path Traversal read — 'filePath' query parameter is used verbatim
     //        to read a file from the filesystem. No canonical path check,
     //        no boundary enforcement against the upload directory.
     //

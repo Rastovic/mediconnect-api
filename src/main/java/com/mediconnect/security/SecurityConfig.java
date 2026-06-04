@@ -35,7 +35,7 @@ public class SecurityConfig {
             //        from any origin can be triggered without a CSRF token.
             .csrf(AbstractHttpConfigurer::disable)
 
-            // [A02] All security response headers disabled:
+            // [A04] All security response headers disabled:
             //        - No Strict-Transport-Security (HSTS)
             //        - No Content-Security-Policy (CSP)
             //        - No X-Frame-Options       → clickjacking possible
@@ -53,6 +53,13 @@ public class SecurityConfig {
                 // [A01] Admin routes open to everyone — no ADMIN role enforcement.
                 //        Any unauthenticated request to /api/admin/** is permitted.
                 .requestMatchers("/api/admin/**").permitAll()
+                // [A01][A10] Refill Queue is fully open — no authentication required
+                //        for create, dispense, retry, or delete. Compounds the
+                //        A10 Mishandling-of-Exceptional-Conditions surface in
+                //        RefillQueueService: anyone can submit `quantity: null` to
+                //        trigger the fail-open chain, and the "Force Concurrent
+                //        Dispense" button reproduces the CWE-362 race anonymously.
+                .requestMatchers("/api/refills/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**").permitAll()
@@ -81,7 +88,7 @@ public class SecurityConfig {
         return source;
     }
 
-    // [A02] NoOpPasswordEncoder used — passwords compared as plain text
+    // [A04] NoOpPasswordEncoder used — passwords compared as plain text
     //        by the DaoAuthenticationProvider internal path.
     //        Actual hashing is done manually via PasswordUtils.hashPassword() (MD5),
     //        so what is stored is an MD5 hex string compared as-is.

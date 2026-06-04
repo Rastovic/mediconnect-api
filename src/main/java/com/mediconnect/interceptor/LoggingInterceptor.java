@@ -48,7 +48,7 @@ public class LoggingInterceptor implements HandlerInterceptor {
                                 Exception ex) {
         try {
             // ── IP address ────────────────────────────────────────────────────
-            // [A04] X-Forwarded-For header taken at face value — trivially spoofable.
+            // [A06] X-Forwarded-For header taken at face value — trivially spoofable.
             //        An attacker sends "X-Forwarded-For: 127.0.0.1" and their real IP
             //        is never recorded. Stored verbatim in audit_logs.ip_address.
             String ip = request.getHeader("X-Forwarded-For");
@@ -68,7 +68,7 @@ public class LoggingInterceptor implements HandlerInterceptor {
             String userAgent = request.getHeader("User-Agent"); // [A05] no CR/LF strip
 
             // ── Request parameters ────────────────────────────────────────────
-            // [A04][A09] All query and form parameters written to the DB without masking.
+            // [A06][A09] All query and form parameters written to the DB without masking.
             //        Affected fields include "password", "token", "creditCard", "ssn".
             //
             //    POST /api/auth/login body:  {"username":"admin","password":"secret123"}
@@ -85,7 +85,7 @@ public class LoggingInterceptor implements HandlerInterceptor {
                     .collect(Collectors.joining("; "));
 
             // ── Request body ──────────────────────────────────────────────────
-            // [A04][A09] Raw JSON / form body logged verbatim.
+            // [A06][A09] Raw JSON / form body logged verbatim.
             //        Captures {"password":"secret"} payloads sent to /api/auth/login
             //        or {"role":"ADMIN"} payloads sent to privilege-escalation endpoints.
             String requestBody = "";
@@ -97,7 +97,7 @@ public class LoggingInterceptor implements HandlerInterceptor {
             }
 
             // ── Response body ─────────────────────────────────────────────────
-            // [A04] Response body stored in the audit log — may contain JWT tokens,
+            // [A06] Response body stored in the audit log — may contain JWT tokens,
             //        passwordHash values, or PII returned by the API.
             //        GET /api/users/1 response: {"id":1,"passwordHash":"5f4dcc3b..."}
             //        → the hash is now duplicated in the audit_logs table.
@@ -161,11 +161,11 @@ public class LoggingInterceptor implements HandlerInterceptor {
                     .user(currentUser)
                     .action(request.getMethod() + " " + request.getRequestURI())
                     .entityType("HTTP_REQUEST")
-                    // [A04] IP from spoofable X-Forwarded-For header
+                    // [A06] IP from spoofable X-Forwarded-For header
                     .ipAddress(ip)
                     // [A05] User-Agent without CR/LF sanitization — log injection vector
                     .userAgent(userAgent)
-                    // [A04][A08][A09] Params, bodies, and full stack trace in one column
+                    // [A06][A08][A09] Params, bodies, and full stack trace in one column
                     .details(detailsJson)
                     .createdAt(LocalDateTime.now())
                     .build();

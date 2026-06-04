@@ -12,7 +12,7 @@ import java.io.IOException;
 
 // Wraps every request/response so LoggingInterceptor can read body bytes
 // after Spring MVC has already consumed them.
-// [A04][A09] Enabling body capture is itself a vulnerability surface — the entire
+// [A06][A09] Enabling body capture is itself a vulnerability surface — the entire
 //             request body (including passwords in JSON payloads) is buffered in
 //             memory and then persisted to the audit_logs table verbatim.
 public class RequestCachingFilter extends OncePerRequestFilter {

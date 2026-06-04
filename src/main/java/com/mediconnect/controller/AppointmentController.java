@@ -13,7 +13,7 @@ import java.util.Map;
 
 // [A01] No @PreAuthorize or caller identity check on any endpoint.
 // [A05] GET / accepts doctorName query param and passes it to a raw SQL concatenation.
-// [A06] PUT /{id}/status writes any status value with no state machine enforcement.
+// [A02] PUT /{id}/status writes any status value with no state machine enforcement.
 // [A08] GET /{id}/pdf returns content without Content-MD5 or any integrity header.
 @RestController
 @RequestMapping("/api/appointments")
@@ -44,7 +44,7 @@ public class AppointmentController {
         return ResponseEntity.ok(appointmentService.findById(id));
     }
 
-    // [A06] No state machine — any status string is accepted without validating
+    // [A02] No state machine — any status string is accepted without validating
     //        the current state or the role of the caller.
     //        A patient can send {"status":"APPROVED"} and approve their own appointment.
     //        A billing attack: {"status":"COMPLETED"} on an already COMPLETED appointment
@@ -57,7 +57,7 @@ public class AppointmentController {
         return ResponseEntity.ok(appointmentService.updateStatus(id, status));
     }
 
-    // [A08] Software and Data Integrity Failure — PDF is served without:
+    // [A08] Software or Data Integrity Failure — PDF is served without:
     //        - Content-MD5 header  (RFC 1864 — allows receiver to detect corruption/tampering)
     //        - ETag based on content hash
     //        - Any digital signature inside the document

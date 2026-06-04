@@ -1,11 +1,11 @@
--- [A02] Weak password hashing: MD5 without salt.
+-- [A04] Weak password hashing: MD5 without salt.
 -- MD5('admin123') = '0192023a7bbd73250516f069df18b500'
 -- Password can be recovered by searching public MD5 rainbow tables.
 
 INSERT INTO users (username, email, password_hash, role, active)
 VALUES ('admin', 'admin@mediconnect.com', '0192023a7bbd73250516f069df18b500', 'ADMIN', TRUE);
 
--- [A02] Seed users with MD5 passwords
+-- [A04] Seed users with MD5 passwords
 INSERT INTO users (username, email, password_hash, role, active) VALUES
     ('patient1', 'patient1@mediconnect.com', '827ccb0eea8a706c4c34a16891f84e7b', 'PATIENT', TRUE),   -- MD5('12345')
     ('doctor1',  'doctor1@mediconnect.com',  '5f4dcc3b5aa765d61d8327deb882cf99', 'DOCTOR',  TRUE);   -- MD5('password')

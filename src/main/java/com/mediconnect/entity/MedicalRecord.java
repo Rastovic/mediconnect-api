@@ -5,7 +5,7 @@ import lombok.*;
 
 import java.time.LocalDateTime;
 
-// [A08] Software and Data Integrity Failures: no contentHash field.
+// [A08] Software or Data Integrity Failures: no contentHash field.
 //        Tampering with attachment files cannot be detected, and the integrity
 //        of diagnoses and prescriptions cannot be verified.
 @Entity

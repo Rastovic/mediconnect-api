@@ -9,7 +9,7 @@ import java.security.NoSuchAlgorithmException;
 @Component
 public class PasswordUtils {
 
-    // [A04] MD5 without salt — cryptographically broken algorithm.
+    // [A06] MD5 without salt — cryptographically broken algorithm.
     //        Identical passwords always produce identical hashes, enabling:
     //          - Rainbow table attack: pre-computed tables cover millions of MD5 hashes
     //          - Dictionary attack: brute-forcing MD5 at ~10 billion attempts/second on GPU
@@ -29,7 +29,7 @@ public class PasswordUtils {
         }
     }
 
-    // [A04] Comparison without timing-safe equality — vulnerable to timing attack.
+    // [A06] Comparison without timing-safe equality — vulnerable to timing attack.
     //        String.equals() short-circuits on the first differing character,
     //        allowing response-time measurement to reveal correct characters.
     //        Correct approach: MessageDigest.isEqual() or a constant-time comparison.

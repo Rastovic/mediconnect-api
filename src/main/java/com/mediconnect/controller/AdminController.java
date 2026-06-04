@@ -13,7 +13,7 @@ import java.util.Map;
 
 // [A01] /api/admin/** is mapped to permitAll() in SecurityConfig — no authentication required.
 //        Even endpoints that should be ADMIN-only are fully open to all callers.
-// [A02] GET /config returns raw Environment properties including datasource.password.
+// [A04] GET /config returns raw Environment properties including datasource.password.
 // [A07] POST /users accepts 'role' from the request body — ADMIN account creation.
 // [A09] POST /logs/clear permanently destroys the audit trail without authorization.
 @RestController
@@ -47,7 +47,7 @@ public class AdminController {
         return ResponseEntity.status(201).body(adminService.createUser(body));
     }
 
-    // [A02] Sensitive Data Exposure — returns the complete resolved Spring Environment,
+    // [A04] Sensitive Data Exposure — returns the complete resolved Spring Environment,
     //        spanning application.yaml, OS environment variables, and JVM system properties.
     //
     //  Exposed values include:
@@ -63,7 +63,7 @@ public class AdminController {
         return ResponseEntity.ok(adminService.getConfig(environment));
     }
 
-    // [A09] Security Logging and Monitoring Failures — permanently deletes the entire
+    // [A09] Security Logging and Alerting Failures — permanently deletes the entire
     //        audit log table with no authorization check, no confirmation, and no backup.
     //
     //  Impact:

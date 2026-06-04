@@ -32,7 +32,7 @@ public class MedicalRecordService {
     private final DoctorRepository doctorRepository;
     private final AppointmentRepository appointmentRepository;
 
-    // [A02] Upload directory visible in config — exposed via /actuator/env
+    // [A04] Upload directory visible in config — exposed via /actuator/env
     @Value("${app.upload-dir:/tmp/mediconnect/uploads/}")
     private String uploadDir;
 
@@ -71,7 +71,7 @@ public class MedicalRecordService {
         return toDto(medicalRecordRepository.save(record));
     }
 
-    // [A03] Unrestricted File Upload + Path Traversal write vector.
+    // [A05] Unrestricted File Upload + Path Traversal write vector.
     //
     //  Attack 1 — Unrestricted extension:
     //    Upload "shell.php", "evil.jsp", "malware.exe" → no MIME or extension check.
@@ -89,16 +89,16 @@ public class MedicalRecordService {
         MedicalRecord record = medicalRecordRepository.findById(recordId)
                 .orElseThrow(() -> new RuntimeException("Medical record not found: " + recordId));
 
-        // [A03] getOriginalFilename() — fully attacker-controlled value, no sanitization
+        // [A05] getOriginalFilename() — fully attacker-controlled value, no sanitization
         String filename = file.getOriginalFilename();
 
-        // [A03] Direct string concatenation — no Paths.get(uploadDir).resolve() with
+        // [A05] Direct string concatenation — no Paths.get(uploadDir).resolve() with
         //        toAbsolutePath().normalize() and startsWith(uploadDir) check
         String storagePath = uploadDir + filename;
         Path destination = Paths.get(storagePath);
 
         Files.createDirectories(destination.getParent());
-        // [A03] REPLACE_EXISTING — attacker can overwrite arbitrary files if path traversal succeeds
+        // [A05] REPLACE_EXISTING — attacker can overwrite arbitrary files if path traversal succeeds
         Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
 
         // [A08] content_hash intentionally not computed or persisted
@@ -111,7 +111,7 @@ public class MedicalRecordService {
         return storagePath;
     }
 
-    // [A03] Path Traversal read vector — filePath query parameter used directly.
+    // [A05] Path Traversal read vector — filePath query parameter used directly.
     //
     //  Attack examples:
     //    ?filePath=/etc/passwd
@@ -122,7 +122,7 @@ public class MedicalRecordService {
     //  No canonical path check, no startsWith(uploadDir) boundary enforcement,
     //  no check that the record's own attachmentPath matches filePath.
     public byte[] downloadAttachment(String filePath) throws IOException {
-        // [A03] filePath taken verbatim from query parameter — attacker controls the path
+        // [A05] filePath taken verbatim from query parameter — attacker controls the path
         Path path = Paths.get(filePath);
 
         // Secure implementation would require:
@@ -134,7 +134,7 @@ public class MedicalRecordService {
             throw new RuntimeException("File not found: " + filePath);
         }
 
-        // [A03] Reads any file accessible to the JVM process — no boundary check
+        // [A05] Reads any file accessible to the JVM process — no boundary check
         return Files.readAllBytes(path);
     }
 

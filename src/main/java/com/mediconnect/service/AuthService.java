@@ -25,7 +25,7 @@ public class AuthService {
     //        without any server-side validation or whitelist check.
     //        Client can send {"role":"ADMIN"} and register an admin account.
     // [A07] No password complexity validation: length, characters, entropy.
-    // [A04] MD5 without salt — delegated to PasswordUtils.hashPassword()
+    // [A06] MD5 without salt — delegated to PasswordUtils.hashPassword()
     public User register(RegisterRequest request) {
         // [A07] User Enumeration: explicit "username already taken" message reveals
         //        which usernames are registered, enabling account harvesting.

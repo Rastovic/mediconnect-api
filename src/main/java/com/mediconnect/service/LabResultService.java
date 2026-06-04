@@ -98,8 +98,8 @@ public class LabResultService {
         return toDto(lr);
     }
 
-    // [A03] Unrestricted File Upload — nema validacije ekstenzije, MIME tipa ni veličine.
-    // [A03] Predvidivo ime fajla — getOriginalFilename() čuva se direktno bez UUID randomizacije.
+    // [A05] Unrestricted File Upload — nema validacije ekstenzije, MIME tipa ni veličine.
+    // [A05] Predvidivo ime fajla — getOriginalFilename() čuva se direktno bez UUID randomizacije.
     //
     //  Problem 1 — Predvidivo ime:
     //    Napadač zna putanju fajla čim poznaje patientId:
@@ -116,26 +116,26 @@ public class LabResultService {
         LabResult lr = labResultRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Lab result not found: " + id));
 
-        // [A03] getOriginalFilename() — potpuno pod kontrolom napadača, bez sanitizacije
+        // [A05] getOriginalFilename() — potpuno pod kontrolom napadača, bez sanitizacije
         String filename = file.getOriginalFilename();
 
-        // [A03] Direktna konkatenacija — nema normalize(), nema UUID prefiksa
+        // [A05] Direktna konkatenacija — nema normalize(), nema UUID prefiksa
         // Sigurno: String filename = UUID.randomUUID() + "_" + originalName;
         String storagePath = uploadDir + filename;
         Path destination = Paths.get(storagePath);
 
         Files.createDirectories(destination.getParent());
-        // [A03] REPLACE_EXISTING — legitimni fajl može biti preguzan
+        // [A05] REPLACE_EXISTING — legitimni fajl može biti preguzan
         Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
 
         lr.setAttachmentPath(storagePath);
         labResultRepository.save(lr);
 
-        // [A02] Puna putanja vraćena klijentu — otkriva strukturu fajl sistema
+        // [A04] Puna putanja vraćena klijentu — otkriva strukturu fajl sistema
         return storagePath;
     }
 
-    // [A03] Path Traversal (read) — filePath parametar korišćen verbatim.
+    // [A05] Path Traversal (read) — filePath parametar korišćen verbatim.
     //
     //  Primeri napada:
     //    filePath = /etc/passwd
@@ -146,13 +146,13 @@ public class LabResultService {
     //
     //  Nema: path.toAbsolutePath().normalize().startsWith(base) provere.
     public byte[] downloadFile(String filePath) throws IOException {
-        // [A03] Paths.get() prima string direktno — nema boundary check
+        // [A05] Paths.get() prima string direktno — nema boundary check
         Path path = Paths.get(filePath);
 
         if (!Files.exists(path)) {
             throw new RuntimeException("File not found: " + filePath);
         }
-        // [A03] Čita bilo koji fajl dostupan JVM procesu bez ograničenja
+        // [A05] Čita bilo koji fajl dostupan JVM procesu bez ograničenja
         return Files.readAllBytes(path);
     }
 

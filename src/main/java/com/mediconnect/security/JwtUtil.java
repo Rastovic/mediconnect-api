@@ -14,7 +14,7 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
-    // [A02][A04] JWT secret hardcoded directly in source code.
+    // [A04][A06] JWT secret hardcoded directly in source code.
     //            Visible to anyone with repository access — can be used to sign
     //            arbitrary tokens with any username or role.
     private static final String SECRET = "mediconnect-super-secret-2024";
@@ -23,7 +23,7 @@ public class JwtUtil {
     //        Recommended lifetime for session tokens: 15–60 minutes.
     private static final long EXPIRATION_MS = 30L * 24 * 60 * 60 * 1000;
 
-    // [A02] Key shorter than 256 bits (SECRET is 30 chars = 240 bits).
+    // [A04] Key shorter than 256 bits (SECRET is 30 chars = 240 bits).
     //        JJWT's WeakKeyException bypassed by zero-padding instead of using
     //        a cryptographically strong key from Keys.secretKeyFor(HS256).
     private Key getSigningKey() {

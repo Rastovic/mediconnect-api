@@ -1,4 +1,4 @@
--- [A04] Insecure Design: all PII fields stored as plaintext without encryption.
+-- [A06] Insecure Design: all PII fields stored as plaintext without encryption.
 -- insurance_number, date_of_birth, blood_type, allergies and emergency_contact
 -- should be encrypted at the database or application layer.
 CREATE TABLE patients (

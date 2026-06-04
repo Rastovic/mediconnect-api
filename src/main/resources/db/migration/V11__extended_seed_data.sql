@@ -1,5 +1,5 @@
 -- Extended seed: 3 patients, 3 doctors, 1 lab tech, 1 pharmacist + full relational data.
--- [A02] All passwords hashed with unsalted MD5 — intentional vulnerability.
+-- [A04] All passwords hashed with unsalted MD5 — intentional vulnerability.
 
 -- ─── USERS ───────────────────────────────────────────────────────────────────
 

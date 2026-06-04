@@ -1,6 +1,6 @@
 -- V12: rich additional data — more lab results, appointments, medical records,
 --      prescriptions and messages for all accounts.
--- [A02] Passwords hashed with unsalted MD5 — intentional vulnerability.
+-- [A04] Passwords hashed with unsalted MD5 — intentional vulnerability.
 
 -- ─── HELPER VARS — patient / doctor IDs ──────────────────────────────────────
 

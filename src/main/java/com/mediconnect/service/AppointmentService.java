@@ -75,7 +75,7 @@ public class AppointmentService {
         return toDto(appointment);
     }
 
-    // [A06] No state machine — status is written directly from the request string
+    // [A02] No state machine — status is written directly from the request string
     //        without checking the current state or allowed transitions.
     //        Valid business transitions: REQUESTED → APPROVED → COMPLETED
     //                                   REQUESTED → CANCELLED
@@ -87,7 +87,7 @@ public class AppointmentService {
         Appointment appointment = appointmentRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Appointment not found: " + id));
 
-        // [A06] No validation of previous state, no role check on who can make this transition
+        // [A02] No validation of previous state, no role check on who can make this transition
         appointment.setStatus(AppointmentStatus.valueOf(status));
         return toDto(appointmentRepository.save(appointment));
     }

