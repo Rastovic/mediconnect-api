@@ -2645,6 +2645,192 @@ Each tab places its privileged actions inline with the table. Refill overrides a
 
 ---
 
+## Admin View Redesign — Module B (Clinical Staff Onboarding)
+
+> Backend: new `AdminStaffController` + `AdminStaffService` and migration V19 (adds `doctors.license_verified` + `license_document_path`). UI: full `AdminOnboardingPage` (replacing the Phase 0 stub) with `staffApi` in `api/admin.ts`.
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/AdminStaffController.java` | `GET /admin/doctors`, `PUT /admin/doctors/{id}`, `POST /admin/doctors/{id}/verify-license`, `POST /admin/staff/onboard` (multipart) |
+| `service/AdminStaffService.java` | License flip (trust client), doctor mass-assign, onboarding (User + role profile + path-traversal upload) |
+| `V19__doctor_license_verification.sql` | Adds `license_verified BOOLEAN` and `license_document_path VARCHAR(500)` to `doctors` |
+| `entity/Doctor.java` (modified) | Two new fields wired to the V19 columns |
+| **Frontend** `pages/admin/AdminOnboardingPage.tsx` | Wizard form (User fields + role-specific section), file upload field, doctor list with one-click Verify |
+| **Frontend** `api/admin.ts#staffApi` | Typed wrappers; `onboard()` builds a FormData and lets axios set the Content-Type boundary |
+
+### Vulnerabilities
+
+**179. [A04] POST /admin/doctors/{id}/verify-license trusts client claim — `AdminStaffService.java#verifyLicense`**
+```java
+if (body.containsKey("licenseNumber")) {
+    doctor.setLicenseNumber((String) body.get("licenseNumber"));
+}
+boolean verified = body.containsKey("verified") ? Boolean.TRUE.equals(body.get("verified")) : true;
+doctor.setLicenseVerified(verified);
+```
+"Verification" is the client telling the server `verified=true`. No call to any external licensing registry, no document inspection, no signed attestation. Same call can simultaneously rewrite the `licenseNumber` — attacker sets any number they like and immediately marks it valid. The UI's one-click "Verify" button (`AdminOnboardingPage.tsx`) wraps this in two clicks (open page → click) for any caller who can hit `/admin/*`.
+
+---
+
+**180. [A07] PUT /admin/doctors/{id} mass-assigns every doctor field — `AdminStaffService.java#updateDoctor`**
+```java
+if (body.containsKey("specialty"))       doctor.setSpecialty(...);
+if (body.containsKey("licenseNumber"))   doctor.setLicenseNumber(...);
+if (body.containsKey("hospital"))        doctor.setHospital(...);
+if (body.containsKey("licenseVerified")) doctor.setLicenseVerified(Boolean.TRUE.equals(body.get("licenseVerified")));
+```
+Patches every doctor column from the body, including `licenseVerified` so the caller can both un-verify a real doctor and re-verify a fake one in the same call. Combined with #174 (admin can re-target a prescription's `patientId`) and #177 (lab value override), an attacker can construct an end-to-end forged clinical record: fake doctor → fake prescription pointing at the victim patient → fake lab value supporting the diagnosis.
+
+---
+
+**181. [A05] POST /admin/staff/onboard path traversal via license document upload — `AdminStaffService.java#onboardStaff`**
+```java
+String filename = licenseDocument.getOriginalFilename();
+String storagePath = uploadDir + filename;
+Path destination = Paths.get(storagePath);
+Files.createDirectories(destination.getParent());
+Files.copy(licenseDocument.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
+```
+Same pattern as the existing `MedicalRecordService.uploadAttachment` sink (#11 family). `getOriginalFilename()` is attacker-controlled and concatenated directly into `uploadDir`. Demo payload (multipart filename header):
+```
+Content-Disposition: form-data; name="licenseDocument"; filename="../../../tmp/shell.jsp"
+```
+Lands `shell.jsp` outside the upload directory. `REPLACE_EXISTING` means the attacker can overwrite arbitrary files if the traversal lands on a writable target.
+
+---
+
+**182. [A07] POST /admin/staff/onboard creates any role from form data — `AdminStaffService.java#onboardStaff`**
+```java
+String roleStr = fields.getOrDefault("role", "PATIENT");
+Role role = Role.valueOf(roleStr);
+User user = User.builder()
+    .role(role)
+    // [A06] MD5(password) — no salt
+    .passwordHash(passwordUtils.hashPassword(fields.getOrDefault("password", "changeme")))
+    ...
+```
+Multipart form data accepts `role` verbatim — including ADMIN. Combined with the unauthenticated `permitAll` on `/api/admin/**`, this is a **second** unauthenticated ADMIN-account-creation surface (the first being `POST /admin/users`, #63). Wrapped in a wizard UI on `AdminOnboardingPage`, so an attacker who navigates there directly fills the form, selects "ADMIN" from the role dropdown, and submits.
+
+---
+
+**183. [A05] Uploaded filename rendered as HTML on the onboarding result panel — `AdminOnboardingPage.tsx` (frontend)**
+```tsx
+<span
+  className="text-[#F85149]"
+  dangerouslySetInnerHTML={{ __html: lastResult.uploadedFilename }}
+/>
+```
+After a successful upload, the result panel echoes the original filename via `dangerouslySetInnerHTML`. A filename like `<img src=x onerror=fetch('/api/admin/users/1/impersonate',{method:'POST'}).then(r=>r.json()).then(d=>localStorage.token=d.token)>` becomes immediate XSS in the admin's session. Pairs with #181: the path traversal lands the file on disk **and** the filename payload executes in the browser.
+
+---
+
+**184. [A04] Doctor entity carries `licenseVerified` + `licenseDocumentPath` with no audit trail — `Doctor.java`, `V19__doctor_license_verification.sql`**
+```java
+@Column(name = "license_verified")
+private Boolean licenseVerified;
+
+@Column(name = "license_document_path", length = 500)
+private String licenseDocumentPath;
+```
+The verification timestamp, the verifier, and the previous value of `licenseVerified` are all missing. Flipping the flag back-and-forth leaves no record of when or by whom — `LoggingInterceptor` captures the HTTP call but a follow-up `DELETE /admin/logs/{id}` (#160) removes that. Plus `licenseDocumentPath` is stored verbatim; if traversal succeeded the path field publicly advertises the attacker-controlled location for future reference.
+
+---
+
+## Admin View Redesign — Module F (Broadcast)
+
+> Backend: new `AdminBroadcastController` + `AdminBroadcastService`. No new entities — broadcasts ride the existing `messages` table. UI: full `AdminBroadcastPage` (composer + recipients preview + history with redact). Backed by `broadcastApi` in `api/admin.ts`.
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/AdminBroadcastController.java` | `POST /admin/broadcast`, `GET /admin/broadcast/history`, `POST /admin/broadcast/preview`, `POST /admin/messages/{id}/redact` |
+| `service/AdminBroadcastService.java` | Fan-out send, recipient preview, in-place redact |
+| **Frontend** `pages/admin/AdminBroadcastPage.tsx` | Composer (Subject + HTML textarea + Sender ID + role multi-select), live HTML preview, recipients list, history table with Redact buttons |
+| **Frontend** `api/admin.ts#broadcastApi` | Typed wrappers for all Module F endpoints |
+
+### Vulnerabilities
+
+**185. [A05] POST /admin/broadcast stores raw HTML into Message.content — `AdminBroadcastService.java#broadcast`**
+```java
+// [A05] subject + html stored verbatim
+String body_ = "<h3>" + subject + "</h3>" + html;
+for (User recipient : recipients) {
+    Message m = Message.builder()
+            .sender(sender != null ? sender : recipient)
+            .receiver(recipient)
+            .content(body_)
+            .sentAt(LocalDateTime.now())
+            .build();
+    messageRepository.save(m);
+}
+```
+The recipient sink already exists at `MessagesPage.tsx:293` (vuln #84) — message content is rendered via `dangerouslySetInnerHTML` in every patient/doctor inbox. So a broadcast that writes raw HTML into `Message.content` is stored XSS for every account that matches the role filter. Demo payload:
+```json
+POST /api/admin/broadcast
+{"subject": "Maintenance", "html": "<img src=x onerror=fetch('/api/admin/users/1/impersonate',{method:'POST'}).then(r=>r.json()).then(d=>localStorage.token=d.token)>", "roles": ["PATIENT", "DOCTOR"]}
+```
+Every PATIENT and DOCTOR who opens their inbox now has the admin's impersonation token in `localStorage`.
+
+---
+
+**186. [A07] Broadcast `senderId` taken from request body — `AdminBroadcastService.java#broadcast`**
+```java
+Long senderId = body.get("senderId") instanceof Number
+        ? ((Number) body.get("senderId")).longValue()
+        : 1L;
+User sender = userRepository.findById(senderId).orElse(null);
+```
+Compounds the existing `Message.senderId` spoofing surface (#88, #117). The broadcast lands in every recipient inbox attributed to whichever user the attacker named — `doctor1`, `pharmacist1`, the patient's own doctor. The recipient sees a trusted name above the XSS payload, increasing the chance they click through. JWT identity is never consulted.
+
+---
+
+**187. [A04] Broadcast fan-out unbounded — `AdminBroadcastService.java#broadcast`**
+```java
+recipients = userRepository.findAll();
+// ... loop creates one Message per user, synchronously, no upper limit
+```
+Empty role list = "send to all roles" (the UI default). With the seeded 9 accounts this is trivial; on a deployment with N users the endpoint blocks the request thread for N inserts. Pair with #169 (`/maintenance/restart`) for a comedy availability attack — broadcast 10k spam rows, then trigger a restart so the writes flush during shutdown.
+
+---
+
+**188. [A08][A09] POST /admin/messages/{id}/redact overwrites content in place — `AdminBroadcastService.java#redact`**
+```java
+String replacement = body != null && body.get("content") instanceof String
+        ? (String) body.get("content")
+        : "<em>[redacted]</em>";
+m.setContent(replacement);
+messageRepository.save(m);
+```
+No `redacted_at` column, no `redacted_by`, no `original_content`. The only record of what the message used to say lived in the response body of the original send call — `ContentCachingFilter` may have captured it into `audit_logs.details`, but `DELETE /admin/logs/{id}` (#160) and `POST /admin/logs/clear` (#65) both reach that. After a redact + a log delete the message's prior content is gone from the system. UI exposes one-click Redact buttons next to each broadcast in the history table; no confirmation, no diff preview.
+
+---
+
+**189. [A05] Broadcast preview pane renders the draft via `dangerouslySetInnerHTML` — `AdminBroadcastPage.tsx` (frontend)**
+```tsx
+<div
+  className="rounded-[3px] border ... p-3 text-[#E6EDF3] min-h-[120px]"
+  /* [A03] Preview rendered as HTML — same sink as recipient inbox */
+  dangerouslySetInnerHTML={{ __html: wrappedBody }}
+/>
+```
+Self-inflicted XSS: an admin testing their own broadcast payload triggers it locally before sending. Useful as a teaching artifact — the same sink is in both the composer preview and the recipient inbox, so the demo can be reproduced without leaving the admin page. The `subject` field is concatenated into an `<h3>` tag with no escaping (`wrappedBody = "<h3>${subject}</h3>${html}"`), so even the subject is an injection vector.
+
+---
+
+**190. [A04] Send-to-all default + Send button label updates dynamically — `AdminBroadcastPage.tsx` (frontend)**
+```tsx
+const [selectedRoles, setSelectedRoles] = useState<string[]>([])  // empty == "ALL ROLES"
+<Button onClick={() => sendMutation.mutate()} disabled={sendMutation.isPending}>
+  Send to {recipientCount} recipient{recipientCount === 1 ? '' : 's'}
+</Button>
+```
+Initial state is `[]` (no role filter), which the backend interprets as "send to all roles" (vuln #187). The button label dynamically shows the recipient count — but there's no `confirm()` dialog and no second-step approval before fanning out. One click after pasting a payload sends it to every account in the system.
+
+---
+
 
 
 > Rows are ordered to match the **OWASP Top 10:2025** list. Where the old project labels merged
@@ -2656,10 +2842,10 @@ Each tab places its privileged actions inline with the table. Refill overrides a
 | A01 | Broken Access Control | `SecurityConfig.java` (`permitAll` on `/api/admin/**`); `UserController.java` (IDOR, mass assignment on role, all users exposed, PUT /users/{id} no ownership check #95); `AppointmentController.java` (IDOR GET, IDOR PUT #92); `MedicalRecordController.java` (any doctor for any patient; GET all records no access control #93; PUT /{id} no ownership check #107); `LabResultController.java` (IDOR; null patientId → all results exposed #113); `MessageController.java` (conversation IDOR, delete without ownership check, GET /conversations userId not verified #94; PATCH /{id}/read no ownership check #115; DELETE /{id} no ownership check #116); `AdminUserController.java` (entire controller open #145; detail returns audit log with stack traces #146; DELETE #148; impersonate JWT minted with no audit #151); `AdminClinicalController.java` (force-dispense bypasses pharmacist #173; refill override bypasses queue #175); `PatientController.java` (IDOR — full PII without ownership check #89); `StatsController.java` (aggregate statistics — user counts by role, appointment trends, message volume — exposed without any role check #90 #91); `LabResultService.java` (null patientId → all results exposed #106); `PrescriptionController.java` (dispense no role check #108); **Frontend**: `ProtectedRoute.tsx` (client-side RBAC bypass #78); `App.tsx` + `AdminPage.tsx` (admin route no role guard #86); `App.tsx` + `StaffDashboardPage.tsx` (/staff route no role guard #102); `Sidebar.tsx` (unread badge userId param not verified #101; role-based dashboard link client-side only #103); `DashboardPage.tsx` (client-side patient filter on appointments #104); `StaffDashboardPage.tsx` (client-side doctor filter on appointments #105); `MedicalRecordsPage.tsx` (Edit button all roles #111; Dispense button all roles #112); `AdminPage.tsx` (active toggle no ADMIN check #121); `AdminRoute.tsx` (omits requiredRole #155); `ImpersonateBanner.tsx` (banner hideable by clearing localStorage key #156); `AdminUsersPage.tsx` (privileged actions chainable in 3 clicks #157); `AdminOverridesPage.tsx` (all override actions inline, single-click chain #178); `PrescriptionsPage.tsx` (patient IDOR #124; all prescriptions no role check #125; dispense no pharmacist check #126) |
 | A02 | Security Misconfiguration | `AppointmentService.java` (no state machine on status transitions); `PrescriptionService.java` (double dispensing allowed, CANCELLED → DISPENSED allowed — no state machine #110); `SecurityConfig.java` (wildcard CORS, no security headers); `AdminUserService.java#resetPassword` (plaintext password in response body **and** in `audit_logs.details` #150); `AdminOpsService.java#getHealth` (JVM classpath / working dir / DB latency leaked #166); `AdminOpsService.java#setConfig` (runtime mutation of any property #167) |
 | A03 | Software Supply Chain Failures + Injection | `pom.xml` (JJWT CVE-2024-31033 — outdated transitive dependency with known signature-bypass vulnerability); `AdminAuditService.java#search` (SQLi via q/action/from/to concatenated into `createNativeQuery` #158); `AdminAuditService.java#exportLogs` (CSV injection / formula execution + XML injection via unsanitized details/userAgent #162); `AdminAuditService.java#renderXmlWithTemplate` (XXE via insecure DocumentBuilderFactory defaults #163); `AdminOpsService.java#getDashboard` (SQLi via since #165); `AdminOpsService.java#runSql` (arbitrary SQL execution #168); `AdminOpsService.java#backup` (command injection via dbName spliced into sh -c #170); **Frontend**: `AdminLogDetailPage.tsx` (audit details rendered via `dangerouslySetInnerHTML` — stored XSS sink #161); `AdminLogsPage.tsx` (XML export toast-warns then downloads anyway #164); `AdminOpsPage.tsx` (Run-SQL result cells rendered as HTML — stored XSS pivot #171) |
-| A04 | Cryptographic Failures | `application.yaml`, `V10`/`V11`/`V12` (MD5 seed passwords for all 9 accounts #96), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminOpsController.java` (`GET /config` exposes raw datasource.password and all env vars — moved from old AdminController); `AdminUserService.java#bulkDelete` (unbounded batch — DoS-class insecure design #152); `AdminOpsService.java#restart` (`System.exit(0)` reachable by any caller #169); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82); `AdminPage.tsx` (password field type="text" in create modal #120; MD5 hash copyable in user table #122); `ImpersonateBanner.tsx` (hideable banner — visibility gap when impersonating #156); `AdminOpsPage.tsx` (secrets red-flagged then rendered plaintext anyway #172) |
-| A05 | Injection | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param; 4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `AppointmentService.java` (SQL injection via `doctorName`); `V8` + `Message.java` (Stored XSS); `MessageService.java` (Stored XSS via unsanitized content); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); `StatsController.java` (GET /recent — all users' events with no auth filter #97; unreadMessages system-wide count #98); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84); `DashboardPage.tsx` (recent activity feed renders cross-user events #100) |
+| A04 | Cryptographic Failures | `application.yaml`, `V10`/`V11`/`V12` (MD5 seed passwords for all 9 accounts #96), `JwtUtil.java` (weak key), `SecurityConfig.java` (NoOpPasswordEncoder, no security headers); `MedicalRecordController.java` (filesystem path in response); `AdminOpsController.java` (`GET /config` exposes raw datasource.password and all env vars — moved from old AdminController); `AdminUserService.java#bulkDelete` (unbounded batch — DoS-class insecure design #152); `AdminOpsService.java#restart` (`System.exit(0)` reachable by any caller #169); `AdminStaffService.java#verifyLicense` (client-claim verification — no external registry check #179); `AdminStaffService.java#updateDoctor` (verified flag mutable in same call #180); `Doctor.java` + `V19` (licenseVerified flag with no audit trail #184); `GlobalExceptionHandler.java` (raw exception messages + fully-qualified class names + DB table names forwarded to client); **Frontend**: `AuthContext.tsx` (passwordHash in localStorage #79); `LoginPage.tsx` (raw server error in UI #80); `DashboardPage.tsx` (passwordHash column in admin table #82); `AdminPage.tsx` (password field type="text" in create modal #120; MD5 hash copyable in user table #122); `ImpersonateBanner.tsx` (hideable banner — visibility gap when impersonating #156); `AdminOpsPage.tsx` (secrets red-flagged then rendered plaintext anyway #172) |
+| A05 | Injection | `MedicalRecordService.java` (unrestricted upload + Path Traversal write via `getOriginalFilename()`; Path Traversal read via `filePath` param); `LabResultService.java` (predictable filename without UUID; Path Traversal read via `filePath` param; 4×SQLi: 3 string params + 1 numeric UNION without closing quotes); `AppointmentService.java` (SQL injection via `doctorName`); `V8` + `Message.java` (Stored XSS); `MessageService.java` (Stored XSS via unsanitized content); `AdminStaffService.java#onboardStaff` (path traversal via licenseDocument `getOriginalFilename()` + REPLACE_EXISTING #181); `AdminBroadcastService.java#broadcast` (HTML body stored verbatim into Message.content — stored XSS at scale #185); `LoggingInterceptor.java` (Log Injection via unsanitized User-Agent CR/LF); `StatsController.java` (GET /recent — all users' events with no auth filter #97; unreadMessages system-wide count #98); **Frontend**: `MessagesPage.tsx` (`dangerouslySetInnerHTML` Stored XSS #84); `DashboardPage.tsx` (recent activity feed renders cross-user events #100); `AdminOnboardingPage.tsx` (uploadedFilename rendered via `dangerouslySetInnerHTML` #183); `AdminBroadcastPage.tsx` (composer preview pane renders draft HTML via `dangerouslySetInnerHTML` #189) |
 | A06 | Insecure Design | `V2` (PII plaintext), `User.java` (passwordHash in response), `PasswordUtils.java` (MD5, timing attack), `AuthController.java` (JWT in body); `UserService.java` (passwordHash in every response); `AdminUserService.java#generateRandomPassword` (java.util.Random not SecureRandom #153); `AdminUserDetailDto.java` (passwordHash bundled in detail response #154); `LoggingInterceptor.java` (password params + response body logged verbatim, spoofable IP from X-Forwarded-For); **Frontend**: `AuthContext.tsx` (JWT + passwordHash in localStorage #76, #79; unverified JWT decode #77); `axiosInstance.ts` (localStorage read on every request #81); `DashboardPage.tsx` (Token Inspector widget #83; user ID in greeting banner #99); `ProfilePage.tsx` (JWT in URL query param on export #85); `LabResultsPage.tsx` (export to clipboard includes patient ID without access check #114) |
-| A07 | Authentication Failures | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body #109); `AdminUserController.java` (role from body → instant ADMIN creation); `AdminUserService.java#updateUser` (mass-assignment of passwordHash/lockedUntil/active #147); `AdminUserService.java#unlock` (clears lockedUntil + failedLoginAttempts — defeats brute-force lockout #149); `AdminUserService.java#impersonate` (JWT minted for any user, no MFA, no audit #151); `AdminClinicalService.java#updatePrescription` (mass-assigns patientId / dispensedAt — medication-history forgery #174); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup); `AdminPage.tsx` (role change Mass Assignment #87; create user role from body #119); `MessagesPage.tsx` (senderId editable in compose form #88; replySenderId editable in inline reply — impersonate any user #117); `PrescriptionsPage.tsx` (pharmacistId from request body — audit identity spoofable #127) |
-| A08 | Software or Data Integrity Failures | `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request); `AdminClinicalService.java#overrideLabResultValue` (mutates resultValue/referenceRange with no amended flag, original value lost #177) |
-| A09 | Security Logging and Alerting Failures | `AdminAuditController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack; `DELETE /logs/{id}` selective tampering #160); `AdminUserService.java#deleteUser` (hard-delete of any account incl. ADMIN, no archive #148); `AdminUserService.java#bulkDelete` (single audit entry covers many ids #152); `AdminClinicalService.java#deleteMedicalRecord` (hard-delete clinical history + cascade via V18 #176); `AdminOpsService.java#setConfig` (runtime mutation can disable dynamic-read audit hooks #167); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs); `AdminPage.tsx` (Clear All Logs button fires immediately with no confirmation — single click destroys forensic timeline #123) |
+| A07 | Authentication Failures | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body #109); `AdminUserController.java` (role from body → instant ADMIN creation); `AdminUserService.java#updateUser` (mass-assignment of passwordHash/lockedUntil/active #147); `AdminUserService.java#unlock` (clears lockedUntil + failedLoginAttempts — defeats brute-force lockout #149); `AdminUserService.java#impersonate` (JWT minted for any user, no MFA, no audit #151); `AdminClinicalService.java#updatePrescription` (mass-assigns patientId / dispensedAt — medication-history forgery #174); `AdminStaffService.java#onboardStaff` (multipart role accepted incl. ADMIN — second unauth ADMIN-creation surface #182); `AdminBroadcastService.java#broadcast` (senderId from body — broadcast attributed to any user #186); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup); `AdminPage.tsx` (role change Mass Assignment #87; create user role from body #119); `MessagesPage.tsx` (senderId editable in compose form #88; replySenderId editable in inline reply — impersonate any user #117); `PrescriptionsPage.tsx` (pharmacistId from request body — audit identity spoofable #127) |
+| A08 | Software or Data Integrity Failures | `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request); `AdminClinicalService.java#overrideLabResultValue` (mutates resultValue/referenceRange with no amended flag, original value lost #177); `AdminBroadcastService.java#redact` (overwrites Message.content in place, no original preserved #188) |
+| A09 | Security Logging and Alerting Failures | `AdminAuditController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack; `DELETE /logs/{id}` selective tampering #160); `AdminUserService.java#deleteUser` (hard-delete of any account incl. ADMIN, no archive #148); `AdminUserService.java#bulkDelete` (single audit entry covers many ids #152); `AdminClinicalService.java#deleteMedicalRecord` (hard-delete clinical history + cascade via V18 #176); `AdminBroadcastService.java#redact` (message content overwritten, original lost; pairs with #160 to fully erase the message #188); `AdminOpsService.java#setConfig` (runtime mutation can disable dynamic-read audit hooks #167); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs); `AdminPage.tsx` (Clear All Logs button fires immediately with no confirmation — single click destroys forensic timeline #123) |
 | A10 | Mishandling of Exceptional Conditions | `AdminAuditService.java#findById` returns raw stack trace bytes → `AdminLogDetailPage.tsx` renders them via `dangerouslySetInnerHTML` (#159 + #161 chain). **Async Refill Queue feature** (see `A10_FEATURE_PLAN.md`): `RefillQueueService.java` (fail-open promote-to-READY on any validator exception — CWE-636 #128; `catch (Throwable)` around slip printing — CWE-396 #129; `@Scheduled` worker swallows every exception — CWE-755 #130; TOCTOU race on dispense — CWE-362 #131; swallowed `InterruptedException` — CWE-705 #132); `EligibilityValidator.java` (no null check — CWE-754 #133); `V16__create_refill_requests.sql` (schema permits null quantity that triggers the NPE — CWE-665 #134; no UNIQUE constraint for the double-dispense race); `SlipPrinter.java` (write outside try/finally — CWE-460 #135); `RefillRequestDto.java` (raw `failureReason` exception text leaked — CWE-209 #136; absolute `tempSlipPath` leaked #137); `RefillController.java` (`/retry` has no max-retry guard — CWE-400 #138); `SecurityConfig.java` (`/api/refills/**` mapped to `permitAll()` — A01 compounds A10 #139). **Frontend**: `PrescriptionsPage.tsx` (Request Refill button submits `quantity: null` on purpose — feeds the fail-open chain #140); `RefillsPage.tsx` (Dispense button not disabled in-flight — CWE-362 reproducible from UI #141; "Force Concurrent Dispense" button fires 10 parallel calls #142; `failureReason` rendered with `dangerouslySetInnerHTML` — stored XSS pivot #143; Stack-Trace Inspector renders raw exception text + absolute paths — CWE-209 #144); `AdminPage.tsx` + `ProfilePage.tsx` (also render `failureReason` as raw HTML — #143). **Related existing items also touching A10**: `JwtAuthenticationFilter.java` (silently swallows JWT parse exceptions and proceeds as anonymous), `LoggingInterceptor.java` (`ex.printStackTrace(pw)` + logging errors silently swallowed — CWE-209 / CWE-755), `GlobalExceptionHandler.java` (returns raw exception class + message to client). |

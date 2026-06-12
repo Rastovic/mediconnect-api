@@ -34,4 +34,15 @@ public class Doctor {
 
     @Column(columnDefinition = "TEXT")
     private String bio;
+
+    // [A04] Verified flag toggled by POST /api/admin/doctors/verify-license,
+    //        which trusts the client's "verified=true" claim without checking
+    //        against any external licensing registry.
+    @Column(name = "license_verified")
+    private Boolean licenseVerified;
+
+    // [A05] Path of the uploaded license document — written verbatim from
+    //        getOriginalFilename(), no sanitization → path traversal vector.
+    @Column(name = "license_document_path", length = 500)
+    private String licenseDocumentPath;
 }
