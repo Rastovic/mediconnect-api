@@ -47,4 +47,16 @@ public class MedicalRecord {
     private String attachmentPath;
 
     private LocalDateTime createdAt;
+
+    // [A08] Set by DoctorAIService when an external LLM "summarises" a record.
+    //        Frontend chart renders a green "AI verified" check whenever this
+    //        is true — no provenance, no signature, no countersignature.
+    @Column(name = "ai_verified")
+    @Builder.Default
+    private Boolean aiVerified = Boolean.FALSE;
+
+    // [A03] Caller-supplied modelUrl preserved so the SSRF target is visible
+    //        in the chart row when reviewing the AI-verified record.
+    @Column(name = "ai_model_url", length = 2048)
+    private String aiModelUrl;
 }

@@ -1,0 +1,1 @@
+<h3>SOAP Note</h3><p><b>S:</b> ${(data.subjective)!''}</p><p><b>O:</b> ${(data.objective)!''}</p><p><b>A:</b> ${(data.assessment)!''}</p><p><b>P:</b> ${(data.plan)!''}</p>

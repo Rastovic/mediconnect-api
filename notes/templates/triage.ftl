@@ -1,0 +1,1 @@
+<h3>Triage Note</h3><p>Complaint: ${(data.complaint)!''}</p><p>Priority: ${(data.priority)!''}</p>

@@ -140,7 +140,7 @@ public class PrescriptionService {
     private PrescriptionDto toDto(Prescription p) {
         return PrescriptionDto.builder()
                 .id(p.getId())
-                .medicalRecordId(p.getMedicalRecord().getId())
+                .medicalRecordId(p.getMedicalRecord() == null ? null : p.getMedicalRecord().getId())
                 .patientId(p.getPatient().getId())
                 .patientName(fullName(p.getPatient().getUser()))
                 .doctorId(p.getDoctor().getId())
