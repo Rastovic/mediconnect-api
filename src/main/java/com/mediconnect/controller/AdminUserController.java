@@ -88,9 +88,13 @@ public class AdminUserController {
 
     // [A02] Returns the new plaintext password in the response (and lets it
     //        flow into audit_logs.details via the request/response cache).
+    // [A07] Accepts caller-supplied newPassword — admin can set any password directly.
     @PostMapping("/{id}/reset-password")
-    public ResponseEntity<ResetPasswordResponseDto> resetPassword(@PathVariable Long id) {
-        return ResponseEntity.ok(adminUserService.resetPassword(id));
+    public ResponseEntity<ResetPasswordResponseDto> resetPassword(
+            @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body) {
+        String supplied = (body != null) ? body.get("newPassword") : null;
+        return ResponseEntity.ok(adminUserService.resetPassword(id, supplied));
     }
 
     // [A01][A07] Mints a JWT for the target user. No MFA, no audit entry

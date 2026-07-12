@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MediConnect CTF — Challenge Review (53 flags)</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2430; --border:#2d3543;
+    --fg:#e6edf3; --muted:#9aa7b5; --blue:#2f81f7; --green:#3fb950;
+    --amber:#d29922; --red:#f85149; --purple:#a371f7;
+    --mono:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}
+  header{padding:26px 32px 18px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#11161d,#0d1117)}
+  header h1{margin:0 0 6px;font-size:21px}
+  header p{margin:0;color:var(--muted);font-size:13.5px;max-width:920px}
+  .wrap{display:flex;min-height:calc(100vh - 84px)}
+  nav{flex:0 0 220px;border-right:1px solid var(--border);padding:14px 10px;background:var(--panel);position:sticky;top:0;align-self:flex-start;max-height:100vh;overflow-y:auto}
+  nav button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:none;border:none;
+    color:var(--muted);font:inherit;font-size:13px;padding:8px 11px;border-radius:6px;cursor:pointer;margin-bottom:2px}
+  nav button:hover{background:var(--panel2);color:var(--fg)}
+  nav button.active{background:var(--panel2);color:var(--fg);font-weight:600}
+  nav button .tag{font-family:var(--mono);font-size:11px;color:var(--blue);flex:0 0 32px}
+  nav button .cnt{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--muted);background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:0 6px}
+  nav .sep{height:1px;background:var(--border);margin:9px 4px}
+  main{flex:1;padding:24px 32px;max-width:1000px}
+  h2{margin:0 0 4px;font-size:19px}
+  .catmeta{color:var(--muted);font-size:13.5px;margin:0 0 16px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:13px 16px;margin-bottom:11px}
+  .card h3{margin:0 0 7px;font-size:14.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .badge{font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;letter-spacing:.4px}
+  .b-easy{background:rgba(63,185,80,.15);color:var(--green);border:1px solid rgba(63,185,80,.35)}
+  .b-med{background:rgba(210,153,34,.15);color:var(--amber);border:1px solid rgba(210,153,34,.35)}
+  .b-hard{background:rgba(248,81,73,.15);color:var(--red);border:1px solid rgba(248,81,73,.35)}
+  .fid{font-family:var(--mono);font-size:10.5px;color:var(--purple);border:1px solid rgba(163,113,247,.35);background:rgba(163,113,247,.1);border-radius:4px;padding:1px 6px}
+  .pts{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-left:auto}
+  .card p{margin:4px 0;font-size:13.2px}
+  .card p b{color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;margin-right:5px}
+  code{font-family:var(--mono);font-size:12px;background:var(--panel2);padding:1px 5px;border-radius:4px;color:#c9d5e3}
+  .ref{font-family:var(--mono);font-size:11.5px;color:var(--blue)}
+  .shared{font-size:11.5px;color:var(--green);margin-top:5px}
+  .twist{font-size:11.5px;color:var(--amber);margin-top:5px}
+  .intro-card{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:16px 20px;margin-bottom:14px}
+  .intro-card h3{margin-top:0;font-size:15px}
+  table{border-collapse:collapse;width:100%;font-size:12.8px;margin-top:6px}
+  th,td{border:1px solid var(--border);padding:6px 9px;text-align:left}
+  th{background:var(--panel2);color:var(--muted);font-weight:600}
+  .note{font-size:12px;color:var(--muted);border-left:3px solid var(--amber);padding:6px 12px;background:rgba(210,153,34,.06);border-radius:0 6px 6px 0;margin:12px 0}
+  .fixnote{font-size:12px;color:var(--muted);border-left:3px solid var(--red);padding:6px 12px;background:rgba(248,81,73,.06);border-radius:0 6px 6px 0;margin:12px 0}
+  section{display:none} section.active{display:block}
+  @media(max-width:760px){.wrap{flex-direction:column}nav{flex:none;position:static;max-height:none;border-right:none;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap}nav button{width:auto}}
+</style>
+</head>
+<body>
+<header>
+  <h1>MediConnect CTF — Challenge Review</h1>
+  <p>53 capture-the-flag challenges across the OWASP Top 10 (2025), quality-driven and uneven per category. Each flag is retrieved by performing the real exploit, then submitted for verification. Finding IDs (<span class="fid">#nn</span>) trace to <code>VULN_FIX_MAP.md</code>. Difficulty and points shown per card.</p>
+</header>
+<div class="wrap">
+  <nav id="nav">
+    <button data-tab="overview" class="active"><span class="tag">★</span>Overview</button>
+    <div class="sep"></div>
+    <button data-tab="a01"><span class="tag">A01</span>Access Control<span class="cnt">8</span></button>
+    <button data-tab="a02"><span class="tag">A02</span>Misconfig<span class="cnt">4</span></button>
+    <button data-tab="a03"><span class="tag">A03</span>Supply Chain<span class="cnt">4</span></button>
+    <button data-tab="a04"><span class="tag">A04</span>Crypto<span class="cnt">5</span></button>
+    <button data-tab="a05"><span class="tag">A05</span>Injection<span class="cnt">8</span></button>
+    <button data-tab="a06"><span class="tag">A06</span>Insecure Design<span class="cnt">3</span></button>
+    <button data-tab="a07"><span class="tag">A07</span>Auth Failures<span class="cnt">4</span></button>
+    <button data-tab="a08"><span class="tag">A08</span>Integrity<span class="cnt">7</span></button>
+    <button data-tab="a09"><span class="tag">A09</span>Logging<span class="cnt">3</span></button>
+    <button data-tab="a10"><span class="tag">A10</span>Exceptional / SSRF<span class="cnt">7</span></button>
+  </nav>
+  <main>
+
+  <section id="overview" class="active">
+    <h2>Overview — 53 flags</h2>
+    <p class="catmeta">Quality-driven selection from the 261-finding catalogue. Hybrid duplicate policy: exploit ⇒ flag, or it's fixed.</p>
+    <div class="intro-card" style="border-color:rgba(63,185,80,.4)">
+      <h3>Welcome to MediConnect CTF <span style="font-size:11px;color:var(--muted);font-weight:400">— landing page copy (draft)</span></h3>
+      <p style="font-size:13.2px;margin:0 0 8px">MediConnect looks like a normal hospital patient portal — appointments, lab results, prescriptions, messages between patients and doctors. It's also riddled with security holes, on purpose. Your job is to find them and break in.</p>
+      <p style="font-size:13.2px;margin:0 0 4px"><b style="color:var(--muted)">Start here</b></p>
+      <ol style="font-size:13.2px;margin:0 0 8px;padding-left:18px">
+        <li>Log in as the patient below and just use the app for a few minutes — book an appointment, open your labs, message a doctor. Get a feel for how it's meant to work before you start bending it.</li>
+        <li>Open the <b>Challenges</b> page. Each one tells you what you're trying to pull off and roughly where to poke. Pick a category, read the goal, go digging.</li>
+        <li>When an exploit lands, you'll turn up a flag — a string like <code>flag{...}</code>. Drop it into the challenge to score it.</li>
+        <li>Watch your progress fill in. The nastier the bug, the more it's worth.</li>
+      </ol>
+      <table style="max-width:340px">
+        <tr><th>Role</th><th>Username</th><th>Password</th></tr>
+        <tr><td>Patient (this is you)</td><td><code>patient1</code></td><td><code>12345</code></td></tr>
+      </table>
+      <p style="font-size:13.2px;margin:8px 0 8px">That's the only login you're <i>given</i>. There are doctors, a pharmacist, and an admin in here too — getting into their accounts is half the challenge. If you're logged in as someone you shouldn't be, you're doing it right.</p>
+      <p style="font-size:13.2px;margin:0"><b style="color:var(--muted)">Ground rules</b> — it's a sandbox built to be attacked; nothing here touches a real system. The easy ones are <i>meant</i> to feel too easy. Hints exist but cost points, so try first. Have fun. Break things.</p>
+      <div class="note" style="margin-bottom:0">Students get only <code>patient1</code>. Full account roster (admin/doctors/pharmacist/labtech) is instructor-only in <code>TEST_ACCOUNTS.md</code>; reveal more per session via the settings panel. Full copy + roster in plan Appendix A.</div>
+    </div>
+    <div class="intro-card">
+      <h3>How flags &amp; duplicates work</h3>
+      <p style="font-size:13.2px;margin:0 0 8px"><b style="color:var(--muted)">Capture</b> — flags are stored only as salted hashes; the plaintext lives at the exploit's endpoint (record, file, internal URL, callback). Perform the attack, submit the string, server verifies.</p>
+      <p style="font-size:13.2px;margin:0 0 8px"><span class="shared" style="margin:0">● Shared flag</span> — where the same pattern repeats across many endpoints (IDOR etc.), one flag is reachable via any path.</p>
+      <p style="font-size:13.2px;margin:0 0 8px"><span class="twist" style="margin:0">● Distinct twist</span> — a duplicate with a genuinely different angle is promoted to its own flag.</p>
+      <p style="font-size:13.2px;margin:0"><span style="color:var(--red)">● Fixed</span> — boring near-duplicates with no teaching value are remediated on the ctf-platform branch (no dead-ends).</p>
+    </div>
+    <div class="intro-card">
+      <h3>Distribution</h3>
+      <table>
+        <tr><th>Cat</th><th>Category</th><th>Flags</th><th>Finding IDs</th></tr>
+        <tr><td class="ref">A01</td><td>Broken Access Control</td><td>8</td><td>42, 94, 93, 191, 38, 56, 151, 173</td></tr>
+        <tr><td class="ref">A02</td><td>Security Misconfiguration</td><td>4</td><td>28, 32, 64, 169</td></tr>
+        <tr><td class="ref">A03</td><td>Software Supply Chain / dangerous libs</td><td>4</td><td>206, 204, 205, 229</td></tr>
+        <tr><td class="ref">A04</td><td>Cryptographic Failures</td><td>5</td><td>20, 11, 16, 7, 153</td></tr>
+        <tr><td class="ref">A05</td><td>Injection</td><td>8</td><td>51, 194, 55, 170, 48, 47, 46, 264</td></tr>
+        <tr><td class="ref">A06</td><td>Insecure Design</td><td>3</td><td>59, 43, 187</td></tr>
+        <tr><td class="ref">A07</td><td>Authentication Failures</td><td>4</td><td>25, 27, 33, 34</td></tr>
+        <tr><td class="ref">A08</td><td>Data Integrity Failures</td><td>7</td><td>245, 210, 19, 225, 50, 177, 188</td></tr>
+        <tr><td class="ref">A09</td><td>Logging &amp; Alerting Failures</td><td>3</td><td>65, 160, 201</td></tr>
+        <tr><td class="ref">A10</td><td>Exceptional Conditions + SSRF</td><td>7</td><td>220, 228, 128, 131, 130, 136, 254</td></tr>
+        <tr><td class="ref"><b>Σ</b></td><td><b>Total</b></td><td><b>53</b></td><td></td></tr>
+      </table>
+      <div class="note">Category names follow OWASP Top 10 2025 — verify exact IDs/wording against the official release for the thesis. Cross-category collisions to decide once: #229 (RCE=A03 vs SSRF=A10), #226/#217 (signing key A04 vs A08), #148/#176 (hard-delete A01 vs A09).</div>
+    </div>
+    <div class="intro-card" style="border-color:rgba(47,129,247,.4)">
+      <h3>Red-team tool arsenal <span style="font-size:11px;color:var(--muted);font-weight:400">— black-box, from the thesis Red Team PoCs</span></h3>
+      <p style="font-size:12.8px;margin:0 0 6px">Every challenge is exploitable as an external attacker (HTTP only) with the same open-source tooling the thesis cites. This is the "how an attacker with no source access does it" narrative.</p>
+      <table>
+        <tr><th>Cat</th><th>Primary tools</th></tr>
+        <tr><td class="ref">A01</td><td>curl, Burp Suite, ffuf / wfuzz (forced browsing), manual JWT tampering</td></tr>
+        <tr><td class="ref">A02</td><td>nuclei (Spring Boot misconfig templates), curl, SSTI payloads</td></tr>
+        <tr><td class="ref">A03</td><td>OWASP dependency-check, retire.js, curl</td></tr>
+        <tr><td class="ref">A04</td><td>TShark / Wireshark, Bettercap (MITM), hashcat, John the Ripper, testssl.sh, openssl</td></tr>
+        <tr><td class="ref">A05</td><td>sqlmap, curl, Burp</td></tr>
+        <tr><td class="ref">A06</td><td>Burp, curl (state-machine + session-timeout testing)</td></tr>
+        <tr><td class="ref">A07</td><td>hydra (brute force), ffuf, nuclei, curl (manual JWT alg:none / expiry)</td></tr>
+        <tr><td class="ref">A08</td><td>curl (alg:none forge, HTTP-200 integrity oracle), Burp</td></tr>
+        <tr><td class="ref">A09</td><td>ffuf / wfuzz (parallel flooding), curl, log analysis</td></tr>
+        <tr><td class="ref">A10</td><td>curl, Burp, ffuf (concurrency / error-flood), error-message analysis</td></tr>
+      </table>
+      <div class="note" style="margin-bottom:0">This CTF is the interactive companion to the existing thesis (<code>master v2.md</code>): each challenge = a playable version of that category's §X.4 Red Team PoC; the <code>fixed</code> branch = the §X.5 mitigation.</div>
+    </div>
+  </section>
+
+  <!-- A01 -->
+  <section id="a01">
+    <h2>A01 — Broken Access Control</h2>
+    <p class="catmeta">Acting on resources you don't own or roles you don't hold. The app enforces almost no authorization.</p>
+
+    <div class="card"><h3>IDOR — read any object by id <span class="badge b-easy">EASY</span><span class="fid">#42</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Read another user's appointment/record by guessing the id.</p>
+      <p><b>Path</b> <code>GET /api/appointments/{id}</code> with an id that isn't yours — no ownership check; flag in the returned object.</p>
+      <p><b>Code</b> <span class="ref">AppointmentController GET /{id}</span></p>
+      <p class="shared">● Shared flag — same pattern on #52 lab-results, #36 users, #89 patients, #107 medical-records, #197 doctor chart, #57 messages. Any path captures it.</p></div>
+
+    <div class="card"><h3>IDOR via query param <span class="badge b-med">MEDIUM</span><span class="fid">#94</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Read another user's conversations by tampering a query param.</p>
+      <p><b>Path</b> <code>GET /api/messages/conversations?userId=</code> — userId not verified against the JWT subject.</p>
+      <p><b>Code</b> <span class="ref">MessageController</span></p>
+      <p class="twist">● Distinct twist — query-param IDOR (vs path-param #42); teaches parameter tampering.</p></div>
+
+    <div class="card"><h3>Function-level access — returns-all <span class="badge b-easy">EASY</span><span class="fid">#93</span><span class="pts">100</span></h3>
+      <p><b>Do</b> List every patient's medical records without a role.</p>
+      <p><b>Path</b> <code>GET /api/medical-records</code> returns all rows regardless of caller role.</p>
+      <p><b>Code</b> <span class="ref">MedicalRecordController</span></p>
+      <p class="shared">● Shared flag — with #40 all-users, #62 admin-users.</p></div>
+
+    <div class="card"><h3>permitAll on protected routes <span class="badge b-med">MEDIUM</span><span class="fid">#191</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Hit doctor-only endpoints as a patient.</p>
+      <p><b>Path</b> All seven <code>/api/doctor/**</code> controllers are <code>permitAll()</code>; call one directly; flag behind it.</p>
+      <p><b>Code</b> <span class="ref">SecurityConfig</span></p></div>
+
+    <div class="card"><h3>Privilege escalation — role mass-assignment <span class="badge b-easy">EASY</span><span class="fid">#38</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Set your own role via an update call.</p>
+      <p><b>Path</b> <code>PUT /api/users/{id}/role</code> takes the role from the body with no authority check → become ADMIN → read admin flag.</p>
+      <p><b>Code</b> <span class="ref">UserController</span></p></div>
+
+    <div class="card"><h3>Identity spoofing via request body <span class="badge b-med">MEDIUM</span><span class="fid">#56</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Act as another user by supplying their id.</p>
+      <p><b>Path</b> <code>POST /api/messages</code> trusts <code>senderId</code> from the body → send/read as someone else.</p>
+      <p><b>Code</b> <span class="ref">MessageService</span></p>
+      <p class="shared">● Shared flag — same trust bug in #109 pharmacistId, #186 broadcast, #231 prescription, #257 appointment actor.</p></div>
+
+    <div class="card"><h3>Auth-context takeover — impersonation <span class="badge b-hard">HARD</span><span class="fid">#151</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Mint a valid session for any user.</p>
+      <p><b>Path</b> <code>POST /api/admin/users/{id}/impersonate</code> issues a JWT for that user → use it → read admin flag.</p>
+      <p><b>Code</b> <span class="ref">AdminUserService#impersonate</span></p></div>
+
+    <div class="card"><h3>Workflow bypass — force dispense <span class="badge b-hard">HARD</span><span class="fid">#173</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Dispense a prescription skipping the pharmacist workflow entirely.</p>
+      <p><b>Path</b> <code>AdminClinicalService#forceDispense</code> bypasses queue + validator + role → illegitimate dispense yields flag.</p>
+      <p><b>Code</b> <span class="ref">AdminClinicalService#forceDispense</span></p></div>
+  </section>
+
+  <!-- A02 -->
+  <section id="a02">
+    <h2>A02 — Security Misconfiguration</h2>
+    <p class="catmeta">Dangerous defaults: disabled protections, exposed introspection, runtime-mutable ops.</p>
+
+    <div class="card"><h3>Blanket SecurityConfig weakening <span class="badge b-easy">EASY</span><span class="fid">#28</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Exploit disabled CSRF / wildcard CORS / dropped security headers / all-endpoints-open.</p>
+      <p><b>Path</b> Cluster #28/#30/#31/#22 — demonstrate a cross-origin or header-based attack that the missing defenses allow; flag on success.</p>
+      <p><b>Code</b> <span class="ref">SecurityConfig</span></p>
+      <p class="shared">● Shared flag — one misconfig cluster.</p></div>
+
+    <div class="card"><h3>NoOpPasswordEncoder <span class="badge b-med">MEDIUM</span><span class="fid">#32</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Exploit plaintext-comparison password handling.</p>
+      <p><b>Path</b> The registered <code>NoOpPasswordEncoder</code> compares passwords as plaintext; combine with a hash/DB leak to authenticate → flag.</p>
+      <p><b>Code</b> <span class="ref">SecurityConfig</span></p>
+      <p class="twist">● Distinct twist from the blanket cluster.</p></div>
+
+    <div class="card"><h3>Config / secrets dump <span class="badge b-med">MEDIUM</span><span class="fid">#64</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Read raw server configuration incl. secrets.</p>
+      <p><b>Path</b> <code>GET /api/admin/config</code> returns the raw <code>Environment</code> (also Actuator #4); flag is a seeded property.</p>
+      <p><b>Code</b> <span class="ref">AdminService /admin/config</span></p></div>
+
+    <div class="card"><h3>Destructive ops endpoint (System.exit) <span class="badge b-hard">HARD</span><span class="fid">#169</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Trigger a denial-of-service by design.</p>
+      <p><b>Path</b> <code>AdminOpsService#restart</code> calls <code>System.exit(0)</code>; reaching it (via permitAll) kills the app. Flag awarded for demonstrating the exposed control, then fixed for stability.</p>
+      <p><b>Code</b> <span class="ref">AdminOpsService#restart</span></p></div>
+  </section>
+
+  <!-- A03 -->
+  <section id="a03">
+    <h2>A03 — Software Supply Chain / Dangerous Library Features</h2>
+    <p class="catmeta">Dangerous, outdated, or misused library features. Deserialization lives in A08.</p>
+
+    <div class="card"><h3>XXE — unhardened XML parser <span class="badge b-med">MEDIUM</span><span class="fid">#206</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Read a local file via an XML external entity.</p>
+      <p><b>Path</b> <code>DoctorNoteService#importXml</code> uses default <code>DocumentBuilderFactory</code>; submit XML with an external entity pointing at the flag file.</p>
+      <p><b>Code</b> <span class="ref">DoctorNoteService#importXml</span></p>
+      <p class="shared">● Shared flag — same defaults in #163 audit template.</p></div>
+
+    <div class="card"><h3>SSTI — Freemarker inline eval <span class="badge b-med">MEDIUM</span><span class="fid">#204</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Evaluate a server-side template expression.</p>
+      <p><b>Path</b> <code>TemplateRenderer#renderInline</code> renders attacker input as a Freemarker template (via note create) → expression executes → flag.</p>
+      <p><b>Code</b> <span class="ref">TemplateRenderer#renderInline</span></p></div>
+
+    <div class="card"><h3>SSTI — template path traversal <span class="badge b-hard">HARD</span><span class="fid">#205</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Select an arbitrary template file by name.</p>
+      <p><b>Path</b> <code>TemplateRenderer#renderByName</code> resolves a caller-chosen name with no allow-list → load an unintended template → flag.</p>
+      <p><b>Code</b> <span class="ref">TemplateRenderer#renderByName</span></p>
+      <p class="twist">● Distinct twist — file-selection vs expression eval.</p></div>
+
+    <div class="card"><h3>Nashorn eval RCE (deprecated engine) <span class="badge b-hard">HARD</span><span class="fid">#229</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Execute code via the bundled JS engine.</p>
+      <p><b>Path</b> <code>DoctorPrescribingService#drugInteractions</code> <code>eval()</code>s a fetched body (the dangerous <code>nashorn-core:15.6</code> dep); return JS that reads the flag file.</p>
+      <p><b>Code</b> <span class="ref">DoctorPrescribingService#drugInteractions</span> · <span class="ref">pom.xml</span></p>
+      <p class="note" style="margin-top:6px">Same endpoint is the A10 SSRF (<code>catalogueUrl</code>). Decide once whether it teaches RCE (here) or SSRF (A10) — don't double-count.</p></div>
+  </section>
+
+  <!-- A04 -->
+  <section id="a04">
+    <h2>A04 — Cryptographic Failures</h2>
+    <p class="catmeta">Weak hashing, hardcoded keys, predictable randomness, secrets exposed to clients.</p>
+
+    <div class="card"><h3>MD5 unsalted passwords <span class="badge b-easy">EASY</span><span class="fid">#20</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Recover a password from its hash.</p>
+      <p><b>Path</b> <code>PasswordUtils</code> stores unsalted MD5; crack a leaked hash and log in as the target → flag.</p>
+      <p><b>Code</b> <span class="ref">PasswordUtils</span></p></div>
+
+    <div class="card"><h3>passwordHash exposed in responses <span class="badge b-easy">EASY</span><span class="fid">#11</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Harvest a password hash straight from the API.</p>
+      <p><b>Path</b> <code>User</code>/<code>UserDto</code> serialize <code>passwordHash</code>; read it from any user response, then crack (feeds #20).</p>
+      <p><b>Code</b> <span class="ref">User.java / UserDto</span></p>
+      <p class="shared">● Shared flag — same leak in #37, #154.</p></div>
+
+    <div class="card"><h3>Hardcoded JWT signing secret <span class="badge b-med">MEDIUM</span><span class="fid">#16</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Forge an admin JWT.</p>
+      <p><b>Path</b> Secret is hardcoded (<code>mediconnect-super-secret-2024</code>); sign a token with <code>role: ADMIN</code> → admin flag.</p>
+      <p><b>Code</b> <span class="ref">JwtUtil</span></p></div>
+
+    <div class="card"><h3>Plaintext PII at rest <span class="badge b-easy">EASY</span><span class="fid">#7</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Read sensitive PII stored/returned unencrypted &amp; unmasked.</p>
+      <p><b>Path</b> PII columns are plaintext and exposed unmasked in DTOs; flag hidden in a sensitive field.</p>
+      <p><b>Code</b> <span class="ref">V2 migration / DTOs</span></p>
+      <p class="shared">● Shared flag — with #12 unmasked fields.</p></div>
+
+    <div class="card"><h3>Predictable RNG on reset <span class="badge b-hard">HARD</span><span class="fid">#153</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Predict a generated reset password.</p>
+      <p><b>Path</b> <code>generateRandomPassword</code> uses <code>java.util.Random</code>; predict the sequence, hijack the reset, read the flag.</p>
+      <p><b>Code</b> <span class="ref">AdminUserService#generateRandomPassword</span></p></div>
+  </section>
+
+  <!-- A05 -->
+  <section id="a05">
+    <h2>A05 — Injection</h2>
+    <p class="catmeta">Untrusted input reaches an interpreter: SQL, OS shell, template, filesystem, CSV, the DOM.</p>
+
+    <div class="card"><h3>SQL injection (UNION) <span class="badge b-med">MEDIUM</span><span class="fid">#51</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Dump a hidden flag row via SQLi.</p>
+      <p><b>Path</b> <code>GET /api/lab-results/search</code> concatenates 4 params into SQL; inject <code>UNION SELECT</code> to pull the flag.</p>
+      <p><b>Code</b> <span class="ref">LabResultService#search</span></p>
+      <p class="shared">● Shared flag — same bug in #41, #158, #165, #267.</p></div>
+
+    <div class="card"><h3>Blind/boolean SQLi (multi-clause) <span class="badge b-hard">HARD</span><span class="fid">#194</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Extract data with no direct output.</p>
+      <p><b>Path</b> <code>DoctorRosterService#listPatients</code> concatenates <code>q</code>/<code>active</code>/<code>recentDays</code> into multiple clauses → boolean-blind extraction of the flag.</p>
+      <p><b>Code</b> <span class="ref">DoctorRosterService#listPatients</span></p>
+      <p class="twist">● Distinct twist — blind vs UNION.</p></div>
+
+    <div class="card"><h3>Stored XSS → admin bot <span class="badge b-med">MEDIUM</span><span class="fid">#55</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Execute script in an admin context.</p>
+      <p><b>Path</b> <code>POST /api/messages</code> stores raw HTML; a simulated admin victim-bot renders it and the payload posts an admin secret to <code>/api/ctf/xss-callback</code> → flag.</p>
+      <p><b>Code</b> <span class="ref">MessageService</span> · <span class="ref">victim-bot (to build)</span></p></div>
+
+    <div class="card"><h3>Command injection <span class="badge b-hard">HARD</span><span class="fid">#170</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Run an OS command.</p>
+      <p><b>Path</b> <code>POST /api/admin/ops/backup?dbName=</code> passes the param to a shell; inject <code>; cat /ctf-flags/a05.txt</code>.</p>
+      <p><b>Code</b> <span class="ref">AdminOpsService#backup</span></p></div>
+
+    <div class="card"><h3>Path traversal — read <span class="badge b-easy">EASY</span><span class="fid">#48</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Read an arbitrary file off disk.</p>
+      <p><b>Path</b> <code>MedicalRecordService</code> uses a caller <code>filePath</code> unsanitized; <code>../</code> to the flag file.</p>
+      <p><b>Code</b> <span class="ref">MedicalRecordService</span></p>
+      <p class="shared">● Shared flag — with #54.</p></div>
+
+    <div class="card"><h3>Path traversal — write <span class="badge b-med">MEDIUM</span><span class="fid">#47</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Write a file outside the upload dir.</p>
+      <p><b>Path</b> Upload uses <code>getOriginalFilename()</code> verbatim; a traversal filename writes anywhere. Flag confirms placement.</p>
+      <p><b>Code</b> <span class="ref">MedicalRecordService</span></p>
+      <p class="shared">● Shared flag — with #218, #181.</p></div>
+
+    <div class="card"><h3>Unrestricted file upload <span class="badge b-easy">EASY</span><span class="fid">#46</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Upload a disallowed file type.</p>
+      <p><b>Path</b> Attachment endpoint enforces no type/size; upload an executable/script; flag on acceptance.</p>
+      <p><b>Code</b> <span class="ref">MedicalRecordService (POST attachment)</span></p></div>
+
+    <div class="card"><h3>CSV formula injection <span class="badge b-med">MEDIUM</span><span class="fid">#264</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Inject a spreadsheet formula via export.</p>
+      <p><b>Path</b> <code>DoctorAppointmentService#exportCsv</code> writes note cells unescaped; a <code>=</code>-prefixed payload executes on open. Flag on crafted export.</p>
+      <p><b>Code</b> <span class="ref">DoctorAppointmentService#exportCsv</span></p></div>
+  </section>
+
+  <!-- A06 -->
+  <section id="a06">
+    <h2>A06 — Insecure Design</h2>
+    <p class="catmeta">Flaws in the logic and trust model, not a single missing check.</p>
+
+    <div class="card"><h3>Missing state machine — dispense <span class="badge b-med">MEDIUM</span><span class="fid">#59</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Double-dispense / dispense a voided prescription.</p>
+      <p><b>Path</b> <code>PrescriptionService</code> allows any status transition; replay dispense → flag on the illegal second dispense.</p>
+      <p><b>Code</b> <span class="ref">PrescriptionService</span></p></div>
+
+    <div class="card"><h3>Missing state machine — appointment <span class="badge b-easy">EASY</span><span class="fid">#43</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Move an appointment to an illegal status.</p>
+      <p><b>Path</b> <code>PUT /api/appointments/{id}/status</code> accepts any transition (e.g. completed → pending). Flag on an impossible transition.</p>
+      <p><b>Code</b> <span class="ref">AppointmentService</span></p>
+      <p class="twist">● Distinct twist — different lifecycle/resource.</p></div>
+
+    <div class="card"><h3>Unbounded fan-out <span class="badge b-med">MEDIUM</span><span class="fid">#187</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Trigger an unbounded broadcast.</p>
+      <p><b>Path</b> Broadcast has no recipient/size cap; a single call fans out to everyone. Flag on demonstrating the amplification.</p>
+      <p><b>Code</b> <span class="ref">AdminBroadcastService#broadcast</span></p></div>
+  </section>
+
+  <!-- A07 -->
+  <section id="a07">
+    <h2>A07 — Authentication Failures</h2>
+    <p class="catmeta">Registration, login, and token validation that trust the client or leak signal.</p>
+
+    <div class="card"><h3>User enumeration <span class="badge b-easy">EASY</span><span class="fid">#25</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Discover valid accounts.</p>
+      <p><b>Path</b> Distinct error messages on register/login reveal which usernames exist; enumerate to the target account (feeds #27).</p>
+      <p><b>Code</b> <span class="ref">AuthService</span></p>
+      <p class="shared">● Shared flag — with #35.</p></div>
+
+    <div class="card"><h3>No login rate limiting <span class="badge b-med">MEDIUM</span><span class="fid">#27</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Brute-force a weak password.</p>
+      <p><b>Path</b> <code>/api/auth/login</code> has no throttle/lockout; brute the enumerated account → flag on its dashboard.</p>
+      <p><b>Code</b> <span class="ref">AuthService#login</span></p></div>
+
+    <div class="card"><h3>Expiry-skip path bypass <span class="badge b-hard">HARD</span><span class="fid">#33</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Use an expired token where expiry isn't checked.</p>
+      <p><b>Path</b> SKIP_EXPIRY_PATHS accepts expired tokens on <code>/api/public|legacy|reports/</code>; present one → flag.</p>
+      <p><b>Code</b> <span class="ref">JwtAuthenticationFilter</span></p></div>
+
+    <div class="card"><h3>Fail-open token validation <span class="badge b-hard">HARD</span><span class="fid">#34</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Authenticate with a malformed/invalid token.</p>
+      <p><b>Path</b> Token-parse exceptions are swallowed and the request proceeds authenticated; craft an invalid token → reach flag.</p>
+      <p><b>Code</b> <span class="ref">JwtAuthenticationFilter</span></p></div>
+  </section>
+
+  <!-- A08 -->
+  <section id="a08">
+    <h2>A08 — Software &amp; Data Integrity Failures</h2>
+    <p class="catmeta">Trusting data/tokens without verifying integrity: unsafe deserialization, unverified JWTs, unsigned artifacts, silent tamper.</p>
+
+    <div class="card"><h3>Java deserialization RCE <span class="badge b-hard">HARD</span><span class="fid">#245</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Execute code via a serialized object.</p>
+      <p><b>Path</b> The referral inbox base64-deserializes a <code>ReferralBundle</code> with no allow-list; send a gadget chain that reads the flag file.</p>
+      <p><b>Code</b> <span class="ref">DoctorReferralService#decodeBundle</span></p></div>
+
+    <div class="card"><h3>alg:none JWT <span class="badge b-med">MEDIUM</span><span class="fid">#210</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Forge an unsigned token the server trusts.</p>
+      <p><b>Path</b> <code>JwtNoneVerifier</code> accepts <code>alg:none</code>; co-sign as another identity → flag.</p>
+      <p><b>Code</b> <span class="ref">JwtNoneVerifier</span></p>
+      <p class="shared">● Shared flag — with #230.</p></div>
+
+    <div class="card"><h3>JWT algorithm confusion <span class="badge b-hard">HARD</span><span class="fid">#19</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Exploit HS/RS key confusion.</p>
+      <p><b>Path</b> Verifier can be tricked into using the public key as an HMAC secret; sign a forged token accordingly → flag.</p>
+      <p><b>Code</b> <span class="ref">JwtUtil</span></p>
+      <p class="twist">● Distinct twist — key-confusion vs none.</p></div>
+
+    <div class="card"><h3>Weak signing (MD5 + hardcoded key) <span class="badge b-med">MEDIUM</span><span class="fid">#225</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Forge a valid prescription signature.</p>
+      <p><b>Path</b> <code>PrescriptionSigner</code> signs with MD5 + a hardcoded key; recompute a signature for tampered content → flag.</p>
+      <p><b>Code</b> <span class="ref">PrescriptionSigner</span></p>
+      <p class="shared">● Shared flag — with #216, #200 (handoff HMAC-SHA1, no expiry).</p></div>
+
+    <div class="card"><h3>Missing content hash / unsigned artifact <span class="badge b-easy">EASY</span><span class="fid">#50</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Swap a file/PDF undetected.</p>
+      <p><b>Path</b> Uploads/PDFs carry no <code>content_hash</code> or signature; replace the artifact and it's accepted. Flag confirms the integrity gap.</p>
+      <p><b>Code</b> <span class="ref">MedicalRecordService</span> (fold #44/#227 PDFs)</p></div>
+
+    <div class="card"><h3>Clinical-value tamper (no amend) <span class="badge b-med">MEDIUM</span><span class="fid">#177</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Silently alter a lab result.</p>
+      <p><b>Path</b> <code>overrideLabResultValue</code> mutates a result with no amend flag / audit; change it → flag on undetected mutation.</p>
+      <p><b>Code</b> <span class="ref">AdminClinicalService#overrideLabResultValue</span></p>
+      <p class="twist">● Distinct twist — clinical-record integrity.</p></div>
+
+    <div class="card"><h3>Overwrite-in-place (redact) <span class="badge b-med">MEDIUM</span><span class="fid">#188</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Destroy original content with no version history.</p>
+      <p><b>Path</b> <code>AdminBroadcastService#redact</code> overwrites message content in place; the lost original is the finding. Flag on irreversible edit.</p>
+      <p><b>Code</b> <span class="ref">AdminBroadcastService#redact</span></p></div>
+  </section>
+
+  <!-- A09 -->
+  <section id="a09">
+    <h2>A09 — Logging &amp; Alerting Failures</h2>
+    <p class="catmeta">Logs that leak secrets, and audit trails that can be tampered or left blind.</p>
+
+    <div class="card"><h3>Wipe the audit trail <span class="badge b-easy">EASY</span><span class="fid">#65</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Erase all evidence of an action.</p>
+      <p><b>Path</b> Perform a seeded logged action, then <code>POST /api/admin/logs/clear</code>; the missing record yields the flag.</p>
+      <p><b>Code</b> <span class="ref">AdminService /admin/logs/clear</span></p></div>
+
+    <div class="card"><h3>Selective log tampering <span class="badge b-med">MEDIUM</span><span class="fid">#160</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Surgically delete one incriminating entry.</p>
+      <p><b>Path</b> <code>DELETE /api/admin/logs/{id}</code> removes a single record — harder to notice than a wipe. Flag on the targeted deletion.</p>
+      <p><b>Code</b> <span class="ref">AdminAuditService#deleteOne</span></p>
+      <p class="twist">● Distinct twist — surgical vs wholesale.</p></div>
+
+    <div class="card"><h3>Silent no-audit on high-risk op <span class="badge b-med">MEDIUM</span><span class="fid">#201</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Perform a sensitive op that leaves no trace.</p>
+      <p><b>Path</b> Handoff issuance writes no audit entry; the absent log for a high-value action is the finding → flag.</p>
+      <p><b>Code</b> <span class="ref">handoff issuance path</span></p>
+      <p class="shared">● Shared flag — same blind spot in #222, #232, #253, #209. (#70 secrets-in-logs is a strong spare.)</p></div>
+  </section>
+
+  <!-- A10 -->
+  <section id="a10">
+    <h2>A10 — Mishandling of Exceptional Conditions (+ SSRF)</h2>
+    <p class="catmeta">Fetching attacker-chosen URLs (SSRF) and fail-open / swallowed-error handling.</p>
+
+    <div class="card"><h3>SSRF — server fetches your URL <span class="badge b-easy">EASY</span><span class="fid">#220</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Make the server reach an internal-only endpoint.</p>
+      <p><b>Path</b> <code>DoctorLabService#importUrl</code> fetches a caller URL with no allow-list; point it at <code>http://localhost:8085/internal/ctf-metadata</code> → flag.</p>
+      <p><b>Code</b> <span class="ref">ExternalCatalogueClient</span></p>
+      <p class="shared">● Shared flag — same client in #214. (#229 shares this endpoint — see A03.)</p></div>
+
+    <div class="card"><h3>Blind SSRF via outbound POST <span class="badge b-hard">HARD</span><span class="fid">#228</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Exfiltrate via a server-initiated POST to your URL.</p>
+      <p><b>Path</b> Prescription flow POSTs to a caller <code>pharmacyCallbackUrl</code>; capture the outbound request (with internal data) → flag.</p>
+      <p><b>Code</b> <span class="ref">DoctorPrescribingService</span></p>
+      <p class="twist">● Distinct twist — blind/outbound vs inbound-read SSRF.</p></div>
+
+    <div class="card"><h3>Fail-open promote on exception <span class="badge b-med">MEDIUM</span><span class="fid">#128</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Make a failed validation default to allow.</p>
+      <p><b>Path</b> <code>RefillQueueService</code> promotes to READY on any validator exception (trigger via null <code>quantity</code>, #133/#134) → illegitimate dispense → flag.</p>
+      <p><b>Code</b> <span class="ref">RefillQueueService</span></p></div>
+
+    <div class="card"><h3>TOCTOU race — double dispense <span class="badge b-hard">HARD</span><span class="fid">#131</span><span class="pts">300</span></h3>
+      <p><b>Do</b> Win a check-then-act race.</p>
+      <p><b>Path</b> <code>dispense</code> checks then acts without locking; fire concurrent requests to dispense twice → flag on the double.</p>
+      <p><b>Code</b> <span class="ref">RefillQueueService#dispense</span></p></div>
+
+    <div class="card"><h3>Swallow-all in background worker <span class="badge b-med">MEDIUM</span><span class="fid">#130</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Hide a failure in a scheduled job.</p>
+      <p><b>Path</b> <code>@Scheduled runWorker</code> catches every exception silently; drive it into a bad state that goes unreported → flag in that state.</p>
+      <p><b>Code</b> <span class="ref">RefillQueueService (worker)</span></p></div>
+
+    <div class="card"><h3>Verbose exception leakage <span class="badge b-easy">EASY</span><span class="fid">#136</span><span class="pts">100</span></h3>
+      <p><b>Do</b> Read internal detail from an error message.</p>
+      <p><b>Path</b> <code>GET /api/refills</code> returns raw exception text in <code>failureReason</code>; trigger an error that leaks the flag/internal path.</p>
+      <p><b>Code</b> <span class="ref">RefillQueueService</span></p>
+      <p class="shared">● Shared flag — same leak class in #137, #159, #211, #223.</p></div>
+
+    <div class="card"><h3>Silent null on failed decode <span class="badge b-med">MEDIUM</span><span class="fid">#254</span><span class="pts">200</span></h3>
+      <p><b>Do</b> Turn a masked failure into a downstream flaw.</p>
+      <p><b>Path</b> <code>decodeBundle</code> returns <code>null</code> on failure instead of erroring; the unchecked null drives a downstream NPE/bypass that exposes the flag.</p>
+      <p><b>Code</b> <span class="ref">DoctorReferralService#decodeBundle</span></p>
+      <p class="twist">● Distinct twist — failure-masking, pairs with #245.</p></div>
+  </section>
+
+  </main>
+</div>
+<script>
+  const nav=document.getElementById('nav');
+  nav.addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b)return;
+    document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('main section').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById(b.dataset.tab).classList.add('active');
+    window.scrollTo(0,0);
+  });
+</script>
+</body>
+</html>

@@ -170,8 +170,11 @@ public class AdminClinicalService {
         m.put("instructions", rx.getInstructions());
         m.put("status", rx.getStatus() != null ? rx.getStatus().name() : null);
         m.put("patientId", rx.getPatient() != null ? rx.getPatient().getId() : null);
+        m.put("patientName", rx.getPatient() != null ? fullName(rx.getPatient().getUser()) : null);
         m.put("doctorId", rx.getDoctor() != null ? rx.getDoctor().getId() : null);
+        m.put("doctorName", rx.getDoctor() != null ? fullName(rx.getDoctor().getUser()) : null);
         m.put("pharmacistId", rx.getPharmacist() != null ? rx.getPharmacist().getId() : null);
+        m.put("pharmacistName", rx.getPharmacist() != null ? fullName(rx.getPharmacist()) : null);
         m.put("createdAt", rx.getCreatedAt());
         m.put("dispensedAt", rx.getDispensedAt());
         return m;
@@ -182,6 +185,12 @@ public class AdminClinicalService {
         m.put("id", r.getId());
         m.put("prescriptionId", r.getPrescriptionId());
         m.put("patientId", r.getPatientId());
+        String patientName = r.getPatientId() != null
+                ? patientRepository.findById(r.getPatientId())
+                        .map(p -> fullName(p.getUser()))
+                        .orElse(null)
+                : null;
+        m.put("patientName", patientName);
         m.put("quantity", r.getQuantity());
         m.put("status", r.getStatus() != null ? r.getStatus().name() : null);
         m.put("failureReason", r.getFailureReason());
@@ -196,7 +205,9 @@ public class AdminClinicalService {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", rec.getId());
         m.put("patientId", rec.getPatient() != null ? rec.getPatient().getId() : null);
+        m.put("patientName", rec.getPatient() != null ? fullName(rec.getPatient().getUser()) : null);
         m.put("doctorId", rec.getDoctor() != null ? rec.getDoctor().getId() : null);
+        m.put("doctorName", rec.getDoctor() != null ? fullName(rec.getDoctor().getUser()) : null);
         m.put("diagnosis", rec.getDiagnosis());
         m.put("prescription", rec.getPrescription());
         m.put("createdAt", rec.getCreatedAt());
@@ -207,7 +218,9 @@ public class AdminClinicalService {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", lab.getId());
         m.put("patientId", lab.getPatient() != null ? lab.getPatient().getId() : null);
+        m.put("patientName", lab.getPatient() != null ? fullName(lab.getPatient().getUser()) : null);
         m.put("labTechId", lab.getLabTech() != null ? lab.getLabTech().getId() : null);
+        m.put("labTechName", lab.getLabTech() != null ? fullName(lab.getLabTech()) : null);
         m.put("testName", lab.getTestName());
         m.put("resultValue", lab.getResultValue());
         m.put("unit", lab.getUnit());
@@ -216,5 +229,15 @@ public class AdminClinicalService {
         m.put("testDate", lab.getTestDate());
         m.put("notes", lab.getNotes());
         return m;
+    }
+
+    private String fullName(com.mediconnect.entity.User user) {
+        if (user == null) return null;
+        String fn = user.getFirstName();
+        String ln = user.getLastName();
+        if (fn != null && !fn.isBlank() && ln != null && !ln.isBlank()) return fn + " " + ln;
+        if (fn != null && !fn.isBlank()) return fn;
+        if (ln != null && !ln.isBlank()) return ln;
+        return user.getUsername();
     }
 }

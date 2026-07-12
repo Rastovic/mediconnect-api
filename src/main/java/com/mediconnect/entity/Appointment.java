@@ -41,4 +41,25 @@ public class Appointment {
     private String notes;
 
     private LocalDateTime createdAt;
+
+    // [A07] Written verbatim from request body by
+    //        /api/doctor/appointments/{id}/approve — no JWT correlation.
+    @Column(name = "actor_doctor_id")
+    private Long actorDoctorId;
+
+    // [A05] Decline reason rendered with dangerouslySetInnerHTML in inbox list.
+    @Column(name = "decline_reason", columnDefinition = "TEXT")
+    private String declineReason;
+
+    @Column(name = "no_show", nullable = false)
+    @Builder.Default
+    private Boolean noShow = Boolean.FALSE;
+
+    // [A08] /reschedule overwrites requestedDate in place. `originalDate`
+    //        keeps ONE prior value only — no full history table.
+    @Column(name = "rescheduled_at")
+    private LocalDateTime rescheduledAt;
+
+    @Column(name = "original_date")
+    private LocalDateTime originalDate;
 }
