@@ -27,19 +27,7 @@ public class ExternalCatalogueClient {
     public byte[] fetchBytes(String url, HttpHeaders[] outHeaders) {
         try {
             URI uri = URI.create(url);
-            String scheme = uri.getScheme();
-            if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
-                throw new SecurityException("scheme not allowed");
-            }
-            String host = uri.getHost();
-            if (host == null) {
-                throw new SecurityException("host required");
-            }
-            for (InetAddress addr : InetAddress.getAllByName(host)) {
-                if (isInternal(addr)) {
-                    throw new SecurityException("internal address blocked");
-                }
-            }
+            assertPublicHttpUrl(uri);
 
             URL u = uri.toURL();
             URLConnection conn = u.openConnection();
@@ -63,7 +51,29 @@ public class ExternalCatalogueClient {
         }
     }
 
-    private boolean isInternal(InetAddress addr) {
+    /**
+     * SSRF guard shared by every server-side outbound fetch/POST: only http/https,
+     * host required, and no resolved address may be internal (loopback/any-local/
+     * link-local/site-local/multicast). Throws SecurityException when the URL is
+     * not safe to call. Callers must catch and fail generically.
+     */
+    public static void assertPublicHttpUrl(URI uri) throws Exception {
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+            throw new SecurityException("scheme not allowed");
+        }
+        String host = uri.getHost();
+        if (host == null) {
+            throw new SecurityException("host required");
+        }
+        for (InetAddress addr : InetAddress.getAllByName(host)) {
+            if (isInternal(addr)) {
+                throw new SecurityException("internal address blocked");
+            }
+        }
+    }
+
+    private static boolean isInternal(InetAddress addr) {
         return addr.isLoopbackAddress()
                 || addr.isAnyLocalAddress()
                 || addr.isLinkLocalAddress()

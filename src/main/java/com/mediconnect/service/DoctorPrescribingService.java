@@ -85,8 +85,12 @@ public class DoctorPrescribingService {
     private void sendPharmacyNotice(String url, Prescription rx) {
         try {
             URI uri = URI.create(url);
+            // SSRF guard: same public-host allow-list as ExternalCatalogueClient.
+            // A pharmacy callback must never reach an internal/loopback service.
+            ExternalCatalogueClient.assertPublicHttpUrl(uri);
             URL u = uri.toURL();
             HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+            conn.setInstanceFollowRedirects(false);
             conn.setConnectTimeout(5_000);
             conn.setReadTimeout(5_000);
             conn.setDoOutput(true);
