@@ -2,33 +2,42 @@ package com.mediconnect.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-import java.security.Key;
-import java.util.Arrays;
+import javax.crypto.SecretKey;
+import java.util.Base64;
 import java.util.Date;
 
 @Component
 public class JwtUtil {
 
-    // [A04][A06] JWT secret hardcoded directly in source code.
-    //            Visible to anyone with repository access — can be used to sign
-    //            arbitrary tokens with any username or role.
-    private static final String SECRET = "mediconnect-super-secret-2024";
+    // Signing secret injected from the environment — never committed. Must be a
+    // base64 string decoding to at least 32 bytes (256 bits). No fallback: the
+    // app fails to start without it.
+    @Value("${app.jwt.secret}")
+    private String secret;
 
-    // [A07] Token valid for 30 days — an attacker who steals a token has 720 hours of access.
-    //        Recommended lifetime for session tokens: 15–60 minutes.
-    private static final long EXPIRATION_MS = 30L * 24 * 60 * 60 * 1000;
+    // 30-minute access token.
+    private static final long EXPIRATION_MS = 30L * 60 * 1000;
 
-    // [A04] Key shorter than 256 bits (SECRET is 30 chars = 240 bits).
-    //        JJWT's WeakKeyException bypassed by zero-padding instead of using
-    //        a cryptographically strong key from Keys.secretKeyFor(HS256).
-    private Key getSigningKey() {
-        byte[] keyBytes = Arrays.copyOf(SECRET.getBytes(StandardCharsets.UTF_8), 32);
-        return new SecretKeySpec(keyBytes, "HmacSHA256");
+    private SecretKey signingKey;
+
+    @PostConstruct
+    void init() {
+        byte[] decoded;
+        try {
+            decoded = Base64.getDecoder().decode(secret);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("app.jwt.secret must be valid base64", e);
+        }
+        if (decoded.length < 32) {
+            throw new IllegalStateException("app.jwt.secret must decode to at least 32 bytes");
+        }
+        this.signingKey = Keys.hmacShaKeyFor(decoded);
     }
 
     public String generateToken(UserDetails userDetails) {
@@ -36,21 +45,15 @@ public class JwtUtil {
                 .subject(userDetails.getUsername())
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + EXPIRATION_MS))
-                // [A07] Algorithm not explicitly specified — JJWT infers it from the key type.
-                //        Attacker may attempt Algorithm Confusion by replacing the 'alg' header.
-                .signWith(getSigningKey())
+                .signWith(signingKey, Jwts.SIG.HS256)
                 .compact();
     }
 
-    // [A07] Algorithm Confusion: parser does not validate or restrict the 'alg' header
-    //        from incoming tokens. No call to requireAlgorithm() or allowedAlgorithms().
-    //        An attacker controlling the header may attempt:
-    //          - alg: "none"  → unsigned token accepted
-    //          - alg: "RS256" → confusion if RSA keys are present on the classpath
-    //        JJWT 0.12.3 CVE-2024-31033 further enlarges the attack surface.
     public Claims extractAllClaims(String token) {
+        // verifyWith(SecretKey) locks the parser to HMAC with this key:
+        // alg:none tokens (unsecured JWS) and RS256 confusion are both rejected.
         return Jwts.parser()
-                .verifyWith((javax.crypto.SecretKey) getSigningKey())
+                .verifyWith(signingKey)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
@@ -62,8 +65,6 @@ public class JwtUtil {
 
     public boolean validateToken(String token, UserDetails userDetails) {
         String username = extractUsername(token);
-        // [A07] Validation does not check: token revocation, token type (access vs refresh),
-        //        or the 'alg' claim — accepts any signed token with a matching username.
         return username.equals(userDetails.getUsername()) && !isTokenExpired(token);
     }
 

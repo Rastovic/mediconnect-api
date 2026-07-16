@@ -27,6 +27,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class LoggingInterceptor implements HandlerInterceptor {
 
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger(LoggingInterceptor.class);
+    private static final java.util.regex.Pattern SENSITIVE =
+            java.util.regex.Pattern.compile("(?i)pass|token|secret|key|auth|ssn|card");
+
     private final AuditLogRepository auditLogRepository;
     private final UserRepository userRepository;
 
@@ -47,14 +52,8 @@ public class LoggingInterceptor implements HandlerInterceptor {
                                 Object handler,
                                 Exception ex) {
         try {
-            // ── IP address ────────────────────────────────────────────────────
-            // [A06] X-Forwarded-For header taken at face value — trivially spoofable.
-            //        An attacker sends "X-Forwarded-For: 127.0.0.1" and their real IP
-            //        is never recorded. Stored verbatim in audit_logs.ip_address.
-            String ip = request.getHeader("X-Forwarded-For");
-            if (ip == null || ip.isBlank()) {
-                ip = request.getRemoteAddr();
-            }
+            // Trust only the transport-level peer address, never a spoofable header.
+            String ip = request.getRemoteAddr();
 
             // ── User-Agent ────────────────────────────────────────────────────
             // [A05] Log Injection (CWE-117) — User-Agent is stored without stripping
@@ -65,82 +64,27 @@ public class LoggingInterceptor implements HandlerInterceptor {
             //
             //    Stored in DB → when exported to a SIEM or flat-file log, the injected
             //    line appears as a real audit event, corrupting the security timeline.
-            String userAgent = request.getHeader("User-Agent"); // [A05] no CR/LF strip
+            String userAgent = sanitizeHeader(request.getHeader("User-Agent"));
 
-            // ── Request parameters ────────────────────────────────────────────
-            // [A06][A09] All query and form parameters written to the DB without masking.
-            //        Affected fields include "password", "token", "creditCard", "ssn".
-            //
-            //    POST /api/auth/login body:  {"username":"admin","password":"secret123"}
-            //    → stored: params=username=admin; password=secret123;
-            //
-            //    A compromised DB read gives an attacker plaintext credentials for every
-            //    login attempt ever made through the application.
-            //
-            //    Secure: replace the value of any key matching /pass|token|secret|key|auth/i
-            //            with "***REDACTED***" before persisting.
+            // Log parameter KEYS only, with sensitive values redacted. Request and
+            // response bodies are never persisted (they carry passwords, JWTs, PII).
             Map<String, String[]> paramMap = request.getParameterMap();
             String params = paramMap.entrySet().stream()
-                    .map(e -> e.getKey() + "=" + String.join(",", e.getValue()))
+                    .map(e -> e.getKey() + "=" + (isSensitive(e.getKey())
+                            ? "***REDACTED***" : String.join(",", e.getValue())))
                     .collect(Collectors.joining("; "));
 
-            // ── Request body ──────────────────────────────────────────────────
-            // [A06][A09] Raw JSON / form body logged verbatim.
-            //        Captures {"password":"secret"} payloads sent to /api/auth/login
-            //        or {"role":"ADMIN"} payloads sent to privilege-escalation endpoints.
-            String requestBody = "";
-            if (request instanceof ContentCachingRequestWrapper ccr) {
-                byte[] buf = ccr.getContentAsByteArray();
-                if (buf.length > 0) {
-                    requestBody = new String(buf, StandardCharsets.UTF_8);
-                }
-            }
-
-            // ── Response body ─────────────────────────────────────────────────
-            // [A06] Response body stored in the audit log — may contain JWT tokens,
-            //        passwordHash values, or PII returned by the API.
-            //        GET /api/users/1 response: {"id":1,"passwordHash":"5f4dcc3b..."}
-            //        → the hash is now duplicated in the audit_logs table.
-            String responseBody = "";
-            if (response instanceof ContentCachingResponseWrapper ccr) {
-                byte[] buf = ccr.getContentAsByteArray();
-                if (buf.length > 0) {
-                    responseBody = new String(buf, StandardCharsets.UTF_8);
-                }
-            }
-
-            // ── Stack trace ───────────────────────────────────────────────────
-            // [A08] CWE-209 — Information Exposure Through an Error Message.
-            //        ex.printStackTrace(pw) captures the full JVM stack trace including:
-            //          - Internal class names and package structure
-            //          - Framework versions (Spring, Hibernate, Tomcat)
-            //          - SQL query text (from JPA exceptions)
-            //          - File paths (from IO exceptions)
-            //          - Library dependency chain
-            //        All of this is persisted to the audit_logs.details column and is
-            //        readable by anyone who can query GET /api/admin/logs (no role check).
-            //
-            //        Secure: log the exception with a correlation ID, store only the ID
-            //        in the response; keep the full trace in a write-only log sink.
-            String stackTrace = null;
+            // Unhandled exceptions are logged server-side with the framework logger,
+            // never persisted to the audit row (no stack trace in the DB).
             if (ex != null) {
-                StringWriter sw = new StringWriter();
-                PrintWriter pw = new PrintWriter(sw);
-                ex.printStackTrace(pw); // [A08] full JVM stack trace persisted to DB
-                stackTrace = sw.toString();
+                LOG.warn("Unhandled exception for {} {}", request.getMethod(), request.getRequestURI(), ex);
             }
 
-            // ── Build details string ──────────────────────────────────────────
             Map<String, String> details = new LinkedHashMap<>();
             details.put("method",       request.getMethod());
             details.put("uri",          request.getRequestURI());
             details.put("status",       String.valueOf(response.getStatus()));
             details.put("params",       params);
-            details.put("requestBody",  requestBody);
-            details.put("responseBody", responseBody);
-            if (stackTrace != null) {
-                details.put("stackTrace", stackTrace); // [A08] infrastructure leakage
-            }
             long duration = System.currentTimeMillis()
                     - (long) request.getAttribute("_startTime");
             details.put("durationMs", String.valueOf(duration));
@@ -181,5 +125,13 @@ public class LoggingInterceptor implements HandlerInterceptor {
     private String escape(String value) {
         if (value == null) return "";
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private boolean isSensitive(String key) {
+        return key != null && SENSITIVE.matcher(key).find();
+    }
+
+    private String sanitizeHeader(String value) {
+        return value == null ? null : value.replaceAll("[\\r\\n]", " ");
     }
 }

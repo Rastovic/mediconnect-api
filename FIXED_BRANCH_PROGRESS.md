@@ -1,0 +1,52 @@
+# Fixed-branch build progress (CTF Plan Phase 4)
+
+Remediation of the vulnerable base per `FIX_PLAN.md`, on the `fixed` branch,
+in an isolated git worktree so the uncommitted `ctf-platform` tree is untouched.
+
+## Environment / verify recipe
+- Worktree: `~/Downloads/mediconnect-api-fixed` (branch `fixed`).
+- JDK 21: `export JAVA_HOME=$(/usr/libexec/java_home -v 21)` (graalvm-jdk-21.0.2).
+- Isolated DB (fixed migrations are only V1-V25; shared `mediconnect_db` is at V47 with CTF migrations, so it MUST NOT be reused):
+  ```
+  docker exec mediconnect-mysql mysql -uroot -proot -e "CREATE DATABASE IF NOT EXISTS mediconnect_fixed CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+  export DB_USERNAME=root DB_PASSWORD=root
+  export SPRING_DATASOURCE_URL="jdbc:mysql://localhost:3306/mediconnect_fixed?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+  export JWT_SECRET="$(openssl rand -base64 48)" PRESC_SIGN_KEY="$(openssl rand -base64 32)" LAB_SIGN_KEY="$(openssl rand -base64 32)"
+  export SERVER_PORT=8090   # 8085/8099 belong to the ctf-platform run
+  ```
+- Build: `./mvnw -q -o -DskipTests package` ; run: `nohup java -jar target/*.jar > /tmp/mc-fixed.log 2>&1 &`
+- NOTE: RateLimitFilter caps auth endpoints at 5/15min per IP+URI. Restart the app to reset the in-memory window before re-running auth smoke.
+- All changes uncommitted (user reviews before commit). Never commit/push without explicit approval.
+
+## Status
+- [x] Phase 1 — Config hardening. env-var creds, ddl-auto validate, actuator health+info only, generic GlobalExceptionHandler, security headers, bounded ContentCachingFilter (skips multipart), multipart 10/15MB. Verified: clean boot, V1-V25 applied, validate OK.
+- [x] Phase 2 — Crypto. BCrypt(12) with legacy-MD5 verify+transparent-rehash shim; JWT secret from env (base64>=32B) + 30min expiry + HS256 lock; PrescriptionSigner/DoctorLabService -> HMAC-SHA256 with env keys; removed signingKey from DTO/response; passwordHash @JsonIgnore + dropped from all toDto/auth response; SecureRandom 16-char generated passwords. Verified: boot with all secrets.
+- [x] Phase 3 — Auth/JWT. JwtAuthenticationFilter: dropped SKIP_EXPIRY_PATHS, fail-closed 401 on invalid token, cookie-first then header. Generic auth errors (register "Registration failed", login/UDS "Invalid credentials"), Bean Validation on RegisterRequest (min12+complexity), role removed from RegisterRequest (always PATIENT). Failed-login lockout 5/15min. RateLimitFilter (hand-rolled fixed window, no bucket4j dep). JwtNoneVerifier now delegates to JwtUtil (alg:none rejected); co-sign rejects invalid tokens. Verified LIVE on :8090: weak-pw 400, strong-pw 201 no passwordHash, admin login 200 (MD5->bcrypt rehash), wrong-pw/unknown-user both 401 identical, rate-limit 429, mass-assign role=ADMIN->PATIENT, garbage+alg:none tokens 401.
+- [x] Phase 4 — Authorization / A01 (CORE). AuthzService (@authz) with ownership methods; @EnableMethodSecurity; SecurityConfig now authorize-by-default (auth permitAll, /admin/** ADMIN, /doctor/** DOCTOR+ADMIN, else authenticated) — fixes forced-browsing #191 + admin-open. @PreAuthorize ownership on IDOR by-id reads (User/{id}, Patient by-user, Appointment /{id}+/pdf, MedicalRecord /{id}+attachment, LabResult /{id}, Prescription /{id}, Message conversations/conversation/inbox/delete/read); UserController list=ADMIN, role/delete=ADMIN. Message send() takes senderId from SecurityContext (fixes #56 spoof). GlobalExceptionHandler now maps AccessDenied->403, AuthenticationException->401. Verified LIVE :8090: cross-user IDOR 403, patient list 403, cross-chart 403, own read 200, admin list 200, forced-browse /admin 403.
+  - DEFERRED to Phase 4b/FE: list-endpoint param rework + server-side principal filtering on remaining controllers (appointments/prescriptions/lab-results/medical-records list + patient-scoped /me endpoints), doctor mutation row-ownership, delete verb GET->DELETE, FE route guards (AdminRoute/DoctorRoute), impersonation reason+audit.
+- [x] Phase 5 — SQLi. Parameterized LabResultService.searchLabResults (#51), DoctorRosterService.listPatients (#194), AppointmentService.searchAppointments, DoctorAppointmentService.list, AdminOpsService dashboard `since`. Retired runSql + config-override (throw), pinned mysqldump with no shell/param (#170 command-injection). Verified LIVE: UNION + `' OR '1'='1` payloads -> 200, no leak, no 500.
+- [x] Phase 6 — File upload/traversal/CSV. MedicalRecord + LabResult upload: UUID server-name, extension whitelist (pdf/png/jpg/jpeg/dcm), base-dir normalize+startsWith containment, no overwrite. Download reads stored entity path only (filePath param removed, #48). CSV export cells quoted + formula-prefix `'` neutralization (#264). Verified LIVE: CSV cells quoted; downloads by id.
+- [x] Phase 7 — XSS. SanitizerService (jsoup 1.14.3, in .m2). Message content -> text() (all tags stripped, #55), broadcast subject/html -> text()/clean(), star-note -> Safelist.none(). Verified LIVE: `<script>alert(1)</script>hi` stored as `hi`.
+- [x] Phase 8 — SSRF/deser/Nashorn. ExternalCatalogueClient: http/https only, blocks loopback/site-local/link-local/any-local/multicast resolved hosts, no redirect-follow, generic errors (#220/#228). ReferralBundle exec-gadget readObject removed + DoctorReferralService adds strict ObjectInputFilter allow-list (#245). DoctorPrescribingService.drugInteractions: Nashorn eval replaced with Jackson JSON parse (#229). (XXE/SSTI not in the 53 — noted, not fixed.)
+- [x] Phase 9 — Integrity. V26 migration adds content_hash to medical_records + lab_results; SHA-256 computed+stored on upload. (Prescription/lab signing already HMAC in Phase 2.) Verified LIVE: V26 applies clean on fresh DB, ddl-auto validate passes.
+- [x] Phase 10 — State machine + A10. RefillQueueService: fail-CLOSED on eligibility error (FAILED not READY, #128/#254), generic failure_reason (#136), enqueue validates quantity>0 + non-negative requestedBy (#130), worker per-row isolation (poison row can't kill tick), retry cap 5, dispense @Transactional state guard + removed race-widener sleep (#131 window closed; @Version noted as complete fix). Appointment status/edit/cancel gated: canEditAppointment=doctor/admin only (#43 patient self-approve blocked). Verified LIVE: seeded null-qty refill -> FAILED not READY, worker survived.
+- [x] Phase 11 — Logging hygiene. LoggingInterceptor: request/response bodies + stack traces no longer persisted to audit_logs; params logged with sensitive keys (pass/token/secret/key/auth/ssn/card) redacted; User-Agent CR/LF stripped (log-injection); IP from remoteAddr not X-Forwarded-For (#65). Exceptions logged server-side only.
+
+## Remaining
+- [x] Phase 12 — FE hardening (mediconnect-frontend repo). DONE in an isolated worktree `~/Downloads/mediconnect-frontend-fixed` (branch `fixed`, node_modules symlinked to main checkout), mirroring the BE worktree isolation. 21 files, +28/-167.
+  - **A05/A03 XSS**: removed ALL 14 live `dangerouslySetInnerHTML` sinks (MessagesPage msg.content, RefillsPage/ProfilePage/AdminPage/AdminDashboardPage failureReason, ReferralBundleViewer previewSummary, DoctorNoteDetailPage renderedHtml, DoctorLabsPage catalogueResponse, DoctorPatientsPage starNote, DoctorAppointmentsPage declineReason, AdminLogDetailPage details, AdminOpsPage error+cell, AdminBroadcastPage wrappedBody, AdminOnboardingPage uploadedFilename) — all now render as escaped text children. `grep dangerouslySetInnerHTML={` on src = 0 hits.
+  - **A04 passwordHash/copyHash**: dropped `passwordHash` field from AuthUser (AuthContext), AdminUser (api/admin.ts), and AdminPage `User`; removed the "Password Hash" column + `copyHash()` + copiedId state from AdminPage + AdminUsersPage, and the hash Row from AdminUserDetailPage. `grep passwordHash` on src = 0 hits. (Admin password-RESET result "Copy plaintext" left intact — it is a one-time reset temp-pw display, not a stored-hash leak, and out of Phase 12 scope.)
+  - **A08 signingKey panel + token-inspector**: dropped `signingKey` from PrescriptionSignature type (fixed BE `PrescriptionSignatureDto` already omits it) + removed the plaintext-key display in PrescriptionSigner; stripped both prefilled `alg:none` forged JWTs (`DEFAULT_NONE_JWT` in PrescriptionSigner + DoctorNoteDetailPage). Co-sign inputs kept (BE contract still takes a token body; BE now rejects alg:none/invalid) but default emptied + relabelled.
+  - Also cleared a pre-existing baseline `tsc` blocker: unused `viewId` state in MedicalRecordsPage (TS6133) — the `fixed` branch did not compile before this.
+  - Verified: `npm run build` (tsc -b && vite build) clean; `npm run lint` 0 errors (8 pre-existing warnings). NOT yet run live in a browser. All changes uncommitted on branch `fixed`.
+  - Cookie-auth migration (3.4/3.5) still deferred (needs FE/BE lockstep, not flag-critical). JWT-in-localStorage + client-side `decodeJwtPayload` in AuthContext intentionally left as-is under that deferral.
+- [ ] Phase 4b carryover (see above): list-endpoint principal filtering + /me endpoints, doctor mutation row-ownership, delete verb GET->DELETE, FE route guards, impersonation reason+audit.
+- [ ] #160/#201 (audit coverage for privileged ops), XXE/SSTI hardening — not in the flagged-53, left for completeness pass.
+- [ ] Live-verify deserialization (#245) + SSRF (#220/#228) exploit paths end-to-end (code-verified only).
+
+## Final sweep result
+Full `./mvnw -o -DskipTests package` clean. Fresh-DB boot applies V1-V26, ddl-auto validate passes, context loads on :8090. Live smoke green across auth (Phase 3), IDOR/forced-browse/admin-gating (Phase 4), SQLi (Phase 5), CSV/upload (Phase 6), stored-XSS (Phase 7), refill fail-closed (Phase 10). All 48 changed files uncommitted on branch `fixed` in worktree `~/Downloads/mediconnect-api-fixed`.
+
+## Deferred / notes
+- 3.4/3.5 cookie+CSRF migration deferred to the FE phase (not flag-critical; needs FE lockstep). BE already accepts cookie OR header token.
+- FE coordination owed from Phase 2/3: remove passwordHash column, signingKey panel, token field usage in mediconnect-frontend.

@@ -1,5 +1,6 @@
 package com.mediconnect.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.mediconnect.enums.Role;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -23,7 +24,8 @@ public class UserDto {
     private String firstName;
     private String lastName;
     private String phone;
-    // [A06] Password hash visible in every API response
+    // Never serialized to API responses.
+    @JsonIgnore
     private String passwordHash;
     // [A07] Client can send "role": "ADMIN" on registration or update
     private Role role;

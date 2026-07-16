@@ -5,6 +5,7 @@ import com.mediconnect.service.LabResultService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -50,6 +51,7 @@ public class LabResultController {
     //        čiji je rezultat, ili doktor koji ga je naručio.
     //        Bilo koji korisnik može iteracijom ID-a pristupiti tuđim nalazima.
     @GetMapping("/{id}")
+    @PreAuthorize("@authz.canViewLabResult(authentication,#id)")
     public ResponseEntity<LabResultDto> getById(@PathVariable Long id) {
         return ResponseEntity.ok(labResultService.findById(id));
     }
@@ -72,11 +74,12 @@ public class LabResultController {
     //
     // [A04] Puna putanja vraćena u response-u — otkriva strukturu servera.
     @PostMapping(value = "/{id}/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('LAB_TECH','ADMIN','DOCTOR')")
     public ResponseEntity<Map<String, String>> uploadFile(
             @PathVariable Long id,
             @RequestPart("file") MultipartFile file) throws IOException {
-        String path = labResultService.saveAttachment(id, file);
-        return ResponseEntity.ok(Map.of("path", path));
+        labResultService.saveAttachment(id, file);
+        return ResponseEntity.ok(Map.of("status", "stored"));
     }
 
     // [A05] Path Traversal (read) — 'filePath' query parametar prosleđen direktno
@@ -92,12 +95,12 @@ public class LabResultController {
     //  Nema: toAbsolutePath().normalize().startsWith(uploadDir) provere.
     //  Nema: poređenja filePath sa lr.attachmentPath iz baze.
     @GetMapping("/{id}/file")
-    public ResponseEntity<byte[]> downloadFile(
-            @PathVariable Long id,
-            @RequestParam String filePath) throws IOException {
-        byte[] content = labResultService.downloadFile(filePath);
+    @PreAuthorize("@authz.canViewLabResult(authentication,#id)")
+    public ResponseEntity<byte[]> downloadFile(@PathVariable Long id) throws IOException {
+        byte[] content = labResultService.downloadFile(id);
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header("Content-Disposition", "attachment")
                 .body(content);
     }
 

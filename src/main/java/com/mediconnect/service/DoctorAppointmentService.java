@@ -46,22 +46,32 @@ public class DoctorAppointmentService {
                 "       a.actor_doctor_id, a.no_show, a.created_at " +
                 "FROM appointments a WHERE 1=1 "
         );
-        if (doctorId != null) sql.append(" AND a.doctor_id = ").append(doctorId);
+        java.util.List<Object> params = new java.util.ArrayList<>();
+        if (doctorId != null) {
+            sql.append(" AND a.doctor_id = ?").append(params.size() + 1);
+            params.add(doctorId);
+        }
         if (status != null && !status.isBlank()) {
-            sql.append(" AND a.status = '").append(status).append("'");
+            sql.append(" AND a.status = ?").append(params.size() + 1);
+            params.add(status);
         }
         if (from != null && !from.isBlank()) {
-            sql.append(" AND a.requested_date >= '").append(from).append("'");
+            sql.append(" AND a.requested_date >= ?").append(params.size() + 1);
+            params.add(from);
         }
         if (to != null && !to.isBlank()) {
-            sql.append(" AND a.requested_date <= '").append(to).append("'");
+            sql.append(" AND a.requested_date <= ?").append(params.size() + 1);
+            params.add(to);
         }
         if (q != null && !q.isBlank()) {
-            // [A05] Raw concat.
-            sql.append(" AND a.notes LIKE '%").append(q).append("%'");
+            sql.append(" AND a.notes LIKE ?").append(params.size() + 1);
+            params.add("%" + q + "%");
         }
         sql.append(" ORDER BY a.requested_date ASC");
         Query nq = entityManager.createNativeQuery(sql.toString());
+        for (int i = 0; i < params.size(); i++) {
+            nq.setParameter(i + 1, params.get(i));
+        }
         @SuppressWarnings("unchecked")
         List<Object[]> rows = nq.getResultList();
         return rows.stream().map(this::rowToDto).collect(Collectors.toList());
@@ -296,8 +306,14 @@ public class DoctorAppointmentService {
 
     private String safe(String s) {
         if (s == null) return "";
-        // [A03] We DO NOT strip leading =/+/-/@ — that's the formula-injection demo.
-        return s.replace("\r", " ").replace("\n", " ").replace(",", ";");
+        String v = s.replace("\r", " ").replace("\n", " ");
+        // Neutralize CSV formula injection: cells starting with = + - @ (or tab/CR)
+        // are prefixed with a single quote so spreadsheets treat them as text.
+        if (!v.isEmpty() && "=+-@\t\r".indexOf(v.charAt(0)) >= 0) {
+            v = "'" + v;
+        }
+        // Quote the field and escape embedded quotes so commas are data, not delimiters.
+        return "\"" + v.replace("\"", "\"\"") + "\"";
     }
 
     private String fullName(User u) {

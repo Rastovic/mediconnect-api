@@ -196,8 +196,11 @@ public class DoctorNoteService {
                 .orElseThrow(() -> new RuntimeException("Note not found: " + id));
         String jwt = body.get("jwt") == null ? null : body.get("jwt").toString();
         String sub = jwtVerifier.extractSubjectUnsafe(jwt);
+        if (sub == null) {
+            throw new RuntimeException("Invalid co-signer credentials");
+        }
         note.setSignature(jwt);
-        note.setSignerUsername(sub == null ? "unknown" : sub);
+        note.setSignerUsername(sub);
         return toDto(noteRepository.save(note));
     }
 

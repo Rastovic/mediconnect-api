@@ -6,9 +6,11 @@ import com.mediconnect.entity.User;
 import com.mediconnect.security.JwtUtil;
 import com.mediconnect.security.UserPrincipal;
 import com.mediconnect.service.AuthService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -30,19 +32,18 @@ public class AuthController {
     // [A07] No password complexity validation.
     // [A07] User Enumeration: "Username already taken: {username}" reveals registered usernames.
     @PostMapping("/register")
-    public ResponseEntity<Map<String, Object>> register(@RequestBody RegisterRequest request) {
+    public ResponseEntity<Map<String, Object>> register(@Valid @RequestBody RegisterRequest request) {
         try {
             User user = authService.register(request);
             String token = jwtUtil.generateToken(new UserPrincipal(user));
-            // [A06] JWT in JSON response body — not in an HttpOnly cookie
             return ResponseEntity
                     .status(HttpStatus.CREATED)
                     .body(buildAuthResponse(token, user));
         } catch (RuntimeException e) {
-            // [A07] Raw error message forwarded — leaks which usernames exist
+            // Generic message — never reveals which unique constraint failed.
             return ResponseEntity
-                    .status(HttpStatus.CONFLICT)
-                    .body(Map.of("error", e.getMessage()));
+                    .status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", "Registration failed"));
         }
     }
 
@@ -53,21 +54,18 @@ public class AuthController {
     //          "Account is locked until {time}"    → account exists, password correct, locked
     // [A07] No rate limiting — brute-force and credential stuffing attacks are possible.
     @PostMapping("/login")
-    public ResponseEntity<Map<String, Object>> login(@RequestBody LoginRequest request) {
+    public ResponseEntity<Map<String, Object>> login(@Valid @RequestBody LoginRequest request) {
         try {
             User user = authService.login(request);
             String token = jwtUtil.generateToken(new UserPrincipal(user));
-            // [A06] JWT in JSON response body — not in an HttpOnly cookie
             return ResponseEntity.ok(buildAuthResponse(token, user));
-        } catch (RuntimeException e) {
-            // [A07] Original error message forwarded without any generalization
+        } catch (BadCredentialsException e) {
             return ResponseEntity
                     .status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", e.getMessage()));
+                    .body(Map.of("error", "Invalid credentials"));
         }
     }
 
-    // [A06] passwordHash included in auth response — exposed to any JS reading the response
     private Map<String, Object> buildAuthResponse(String token, User user) {
         Map<String, Object> userMap = new LinkedHashMap<>();
         userMap.put("id", user.getId());
@@ -76,8 +74,6 @@ public class AuthController {
         userMap.put("firstName", user.getFirstName());
         userMap.put("lastName", user.getLastName());
         userMap.put("role", user.getRole().name());
-        // [A06] passwordHash intentionally included — visible to client-side JavaScript
-        userMap.put("passwordHash", user.getPasswordHash());
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("token", token);

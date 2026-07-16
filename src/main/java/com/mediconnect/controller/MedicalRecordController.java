@@ -5,6 +5,7 @@ import com.mediconnect.service.MedicalRecordService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -38,6 +39,7 @@ public class MedicalRecordController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("@authz.canViewMedicalRecord(authentication,#id)")
     public ResponseEntity<MedicalRecordDto> getRecord(@PathVariable Long id) {
         return ResponseEntity.ok(medicalRecordService.findById(id));
     }
@@ -89,12 +91,12 @@ public class MedicalRecordController {
     // [A08] No hash verification — the file returned could have been silently modified;
     //        client cannot check integrity against a stored content_hash.
     @GetMapping("/{id}/attachment")
-    public ResponseEntity<byte[]> downloadAttachment(
-            @PathVariable Long id,
-            @RequestParam String filePath) throws IOException {
-        byte[] content = medicalRecordService.downloadAttachment(filePath);
+    @PreAuthorize("@authz.canViewMedicalRecord(authentication,#id)")
+    public ResponseEntity<byte[]> downloadAttachment(@PathVariable Long id) throws IOException {
+        byte[] content = medicalRecordService.downloadAttachment(id);
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header("Content-Disposition", "attachment")
                 .body(content);
     }
 }

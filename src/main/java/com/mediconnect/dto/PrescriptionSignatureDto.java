@@ -19,9 +19,6 @@ public class PrescriptionSignatureDto {
     private Long prescriptionId;
     private String signatureMd5;
     private String signedPayload;
-    // [A02][A04] Plaintext key disclosed in the response body for "easy
-    //            verification" — checked into source on the server side too.
-    private String signingKey;
     private LocalDateTime signedAt;
     private String coSignerUsername;
 }

@@ -49,11 +49,21 @@ public class RefillQueueService {
     //        for the fail-open NPE chain that promotes invalid refills to READY.
     // [A07] requestedBy is taken from the request body, never verified.
     public RefillRequestDto enqueue(RefillCreateDto dto) {
+        // Validate on the way in — no null/invalid quantity, no negative actor id.
+        if (dto.getPrescriptionId() == null || dto.getPatientId() == null) {
+            throw new IllegalArgumentException("prescriptionId and patientId are required");
+        }
+        if (dto.getQuantity() == null || dto.getQuantity() <= 0) {
+            throw new IllegalArgumentException("quantity must be a positive number");
+        }
+        if (dto.getRequestedBy() != null && dto.getRequestedBy() < 0) {
+            throw new IllegalArgumentException("invalid requestedBy");
+        }
         RefillRequest r = RefillRequest.builder()
                 .prescriptionId(dto.getPrescriptionId())
                 .patientId(dto.getPatientId())
                 .requestedBy(dto.getRequestedBy())
-                .quantity(dto.getQuantity())        // [A10] may be null
+                .quantity(dto.getQuantity())
                 .status(RefillStatus.REQUESTED)
                 .retryCount(0)
                 .createdAt(LocalDateTime.now())
@@ -68,16 +78,22 @@ public class RefillQueueService {
     //        The next tick starts cleanly, masking the previous failure entirely.
     @Scheduled(fixedRate = 30_000)
     public void runWorker() {
-        try {
-            List<RefillRequest> batch = refills
-                    .findTop50ByStatusOrderByCreatedAtAsc(RefillStatus.REQUESTED);
-            for (RefillRequest r : batch) {
+        List<RefillRequest> batch = refills
+                .findTop50ByStatusOrderByCreatedAtAsc(RefillStatus.REQUESTED);
+        for (RefillRequest r : batch) {
+            // Per-row isolation: one bad request cannot poison the whole tick.
+            try {
                 processOne(r);
+            } catch (Exception e) {
+                log.warn("Refill {} processing failed; marking FAILED", r.getId(), e);
+                try {
+                    r.setStatus(RefillStatus.FAILED);
+                    r.setFailureReason("Processing failed");
+                    refills.save(r);
+                } catch (Exception ignored) {
+                    // last-resort: skip this row, continue the batch
+                }
             }
-        } catch (Exception e) {
-            // [A10] CWE-755 — generic catch, swallowed exception, no rethrow.
-            //        Original stack trace is printed to System.err only.
-            e.printStackTrace();
         }
     }
 
@@ -97,27 +113,24 @@ public class RefillQueueService {
         refills.save(r);                             // first commit point
 
         try {
-            eligibility.check(r);                    // may throw (NPE on null quantity)
+            eligibility.check(r);
             r.setStatus(RefillStatus.READY);
             r.setFailureReason(null);
         } catch (Exception e) {
-            // [A10] FAIL-OPEN — any exception is treated as success.
-            //        This is the worst-case CWE-636 / CWE-755 pattern.
-            r.setFailureReason(e.toString());        // [A09] raw exception text stored
-            r.setStatus(RefillStatus.READY);         // [A10] fail open
+            // FAIL CLOSED: any eligibility failure marks the request FAILED, never READY.
+            // Store a generic reason; the exception detail is logged server-side only.
+            log.warn("Refill {} eligibility failed", r.getId(), e);
+            r.setFailureReason("Eligibility check failed");
+            r.setStatus(RefillStatus.FAILED);
         }
         refills.save(r);
 
-        // [A10] CWE-460 — slip is created here; cleanup is only attempted inside
-        //        SlipPrinter on the happy path. If createSlip throws after writing
-        //        the temp file, the file lingers forever (CWE-400 amplification).
         try {
             Path slip = slipPrinter.createSlip(r);
-            r.setTempSlipPath(slip.toAbsolutePath().toString());   // [A09] FS path leak
+            r.setTempSlipPath(slip.toAbsolutePath().toString());
             refills.save(r);
-        } catch (Throwable t) {
-            // [A10] CWE-396 — catches Throwable, hiding OutOfMemoryError, ThreadDeath,
-            //        StackOverflowError. The empty body is the only "log" of failure.
+        } catch (Exception t) {
+            log.warn("Slip creation failed for refill {}", r.getId(), t);
         }
     }
 
@@ -129,26 +142,20 @@ public class RefillQueueService {
     //        @Transactional(isolation = SERIALIZABLE).
     //
     // [A07] pharmacistId is taken from the request body — caller-attributed actor.
+    @Transactional
     public RefillRequestDto dispense(Long id, Long pharmacistId) {
         RefillRequest r = refills.findById(id)
                 .orElseThrow(() -> new RuntimeException("RefillRequest not found: " + id));
 
+        // State-machine guard inside the transaction: only READY -> DISPENSED.
+        // (A @Version optimistic-lock column is the complete fix for concurrent
+        // dispense; the transactional re-check closes the obvious TOCTOU window.)
         if (r.getStatus() != RefillStatus.READY) {
             throw new IllegalStateException("not ready");
         }
 
-        // simulated inventory I/O — intentionally widens the race window
-        try {
-            Thread.sleep(50);
-        } catch (InterruptedException ignored) {
-            // [A10] CWE-705 — InterruptedException swallowed; thread loses interrupt status.
-            //        During graceful shutdown, the JVM interrupts worker threads; this
-            //        swallow means the dispense completes anyway, producing transactions
-            //        that begin after the shutdown signal.
-        }
-
         r.setStatus(RefillStatus.DISPENSED);
-        r.setPharmacistId(pharmacistId);             // [A07] body-supplied actor
+        r.setPharmacistId(pharmacistId);
         r.setDispensedAt(LocalDateTime.now());
         return toDto(refills.save(r));
     }
@@ -156,13 +163,18 @@ public class RefillQueueService {
     // [A10] CWE-400 — No maximum retry guard. Each retry creates a new temp slip
     //        file via SlipPrinter.createSlip; under a tight loop the server's
     //        temp directory fills until the filesystem is exhausted.
+    private static final int MAX_RETRIES = 5;
+
     public RefillRequestDto retry(Long id) {
         RefillRequest r = refills.findById(id)
                 .orElseThrow(() -> new RuntimeException("RefillRequest not found: " + id));
-        r.setRetryCount(r.getRetryCount() + 1);       // no upper bound
+        if (r.getRetryCount() != null && r.getRetryCount() >= MAX_RETRIES) {
+            throw new IllegalStateException("retry limit reached");
+        }
+        r.setRetryCount((r.getRetryCount() == null ? 0 : r.getRetryCount()) + 1);
         r.setStatus(RefillStatus.REQUESTED);
         refills.save(r);
-        processOne(r);                                // fail-open chain re-runs
+        processOne(r);
         return toDto(r);
     }
 

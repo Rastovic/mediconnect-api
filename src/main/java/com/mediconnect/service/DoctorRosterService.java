@@ -51,23 +51,30 @@ public class DoctorRosterService {
                 "       u.email, u.first_name, u.last_name, u.active " +
                 "FROM patients p JOIN users u ON u.id = p.user_id WHERE 1=1 "
         );
+        java.util.List<Object> params = new ArrayList<>();
         if (q != null && !q.isBlank()) {
-            // [A05] Raw concatenation of the search term.
-            sql.append(" AND (u.first_name LIKE '%").append(q).append("%' ")
-               .append("      OR u.last_name LIKE '%").append(q).append("%' ")
-               .append("      OR u.email     LIKE '%").append(q).append("%') ");
+            String like = "%" + q + "%";
+            int base = params.size();
+            sql.append(" AND (u.first_name LIKE ?").append(base + 1)
+               .append(" OR u.last_name LIKE ?").append(base + 2)
+               .append(" OR u.email LIKE ?").append(base + 3).append(") ");
+            params.add(like); params.add(like); params.add(like);
         }
         if (active != null) {
-            // [A05] Boolean spliced directly into SQL.
-            sql.append(" AND u.active = ").append(active ? 1 : 0).append(' ');
+            sql.append(" AND u.active = ?").append(params.size() + 1).append(' ');
+            params.add(active ? 1 : 0);
         }
         if (recentDays != null && recentDays > 0) {
             sql.append(" AND EXISTS (SELECT 1 FROM appointments a WHERE a.patient_id = p.id ")
-               .append("             AND a.created_at > NOW() - INTERVAL ").append(recentDays).append(" DAY) ");
+               .append(" AND a.created_at > NOW() - INTERVAL ?").append(params.size() + 1).append(" DAY) ");
+            params.add(recentDays);
         }
         sql.append(" ORDER BY p.id ASC");
 
         Query nativeQuery = entityManager.createNativeQuery(sql.toString());
+        for (int i = 0; i < params.size(); i++) {
+            nativeQuery.setParameter(i + 1, params.get(i));
+        }
         @SuppressWarnings("unchecked")
         List<Object[]> rows = nativeQuery.getResultList();
 
@@ -202,7 +209,8 @@ public class DoctorRosterService {
                 .orElseThrow(() -> new RuntimeException("Patient not found: " + patientId));
         boolean star = body == null || !Boolean.FALSE.equals(body.get("starred"));
         Object noteObj = body == null ? null : body.get("note");
-        String note = noteObj == null ? "" : noteObj.toString();
+        String note = noteObj == null ? ""
+                : org.jsoup.Jsoup.clean(noteObj.toString(), org.jsoup.safety.Safelist.none());
         if (star) {
             patientStars.put(patientId, note);
         } else {

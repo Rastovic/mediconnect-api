@@ -7,8 +7,10 @@ import com.mediconnect.enums.Role;
 import com.mediconnect.repository.UserRepository;
 import com.mediconnect.security.JwtUtil;
 import com.mediconnect.security.PasswordUtils;
-import com.mediconnect.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -17,40 +19,40 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 public class AuthService {
 
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+    private static final int MAX_FAILED_ATTEMPTS = 5;
+    private static final int LOCK_MINUTES = 15;
+
     private final UserRepository userRepository;
     private final PasswordUtils passwordUtils;
     private final JwtUtil jwtUtil;
 
-    // [A07] Mass Assignment: role taken directly from request body
-    //        without any server-side validation or whitelist check.
-    //        Client can send {"role":"ADMIN"} and register an admin account.
-    // [A07] No password complexity validation: length, characters, entropy.
-    // [A06] MD5 without salt — delegated to PasswordUtils.hashPassword()
+    /**
+     * Registration always creates a PATIENT. The client cannot choose its role.
+     * A single generic failure message is returned regardless of which unique
+     * constraint is hit, so registered accounts cannot be enumerated.
+     */
     public User register(RegisterRequest request) {
-        // [A07] User Enumeration: explicit "username already taken" message reveals
-        //        which usernames are registered, enabling account harvesting.
         String username = (request.getUsername() != null && !request.getUsername().isBlank())
                 ? request.getUsername()
                 : request.getEmail().split("@")[0];
 
         if (userRepository.existsByUsername(username)) {
-            throw new RuntimeException("Username already taken: " + username);
+            log.info("Registration rejected: username already taken ({})", username);
+            throw new RuntimeException("Registration failed");
         }
-
-        // [A07] User Enumeration: also confirms which emails are registered
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Email already registered: " + request.getEmail());
+            log.info("Registration rejected: email already registered ({})", request.getEmail());
+            throw new RuntimeException("Registration failed");
         }
-
-        String roleStr = (request.getRole() != null && !request.getRole().isBlank())
-                ? request.getRole()
-                : "PATIENT";
 
         User user = User.builder()
                 .username(username)
                 .email(request.getEmail())
+                .firstName(request.getFirstName())
+                .lastName(request.getLastName())
                 .passwordHash(passwordUtils.hashPassword(request.getPassword()))
-                .role(Role.valueOf(roleStr))   // [A07] taken directly from client input
+                .role(Role.PATIENT)
                 .active(true)
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -58,37 +60,63 @@ public class AuthService {
         return userRepository.save(user);
     }
 
-    // [A07] User Enumeration: three semantically distinct error messages reveal
-    //        the account state to an attacker and enable username harvesting.
-    // [A07] No rate limiting — unlimited attempts (brute-force / credential stuffing).
+    /**
+     * All failure branches (unknown user / wrong password / locked / inactive)
+     * throw the same BadCredentialsException with a constant message, so no
+     * account state leaks to the caller.
+     */
     public User login(LoginRequest request) {
-
-        // Prefer email lookup (frontend sends email); fall back to username for legacy clients
         User user;
         if (request.getEmail() != null && !request.getEmail().isBlank()) {
-            // Message 1 variant — confirms the email does NOT exist
-            user = userRepository.findByEmail(request.getEmail())
-                    .orElseThrow(() ->
-                            new RuntimeException("User not found: " + request.getEmail()));
+            user = userRepository.findByEmail(request.getEmail()).orElse(null);
         } else {
-            // Message 1 — explicitly confirms that the username does NOT exist in the system
-            user = userRepository.findByUsername(request.getUsername())
-                    .orElseThrow(() ->
-                            new RuntimeException("User not found: " + request.getUsername()));
+            user = userRepository.findByUsername(request.getUsername()).orElse(null);
         }
 
-        // Message 2 — confirms that the user EXISTS but the password is wrong
-        if (!passwordUtils.matches(request.getPassword(), user.getPasswordHash())) {
-            throw new RuntimeException("Invalid password");
+        if (user == null) {
+            throw new BadCredentialsException("Invalid credentials");
         }
 
-        // Message 3 — confirms account EXISTS, password is CORRECT,
-        //              but account is locked and reveals the EXACT unlock time
-        if (user.getLockedUntil() != null
-                && user.getLockedUntil().isAfter(LocalDateTime.now())) {
-            throw new RuntimeException("Account is locked until " + user.getLockedUntil());
+        // Locked account — do not reveal the unlock time.
+        if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(LocalDateTime.now())) {
+            throw new BadCredentialsException("Invalid credentials");
         }
 
+        if (!passwordUtils.verifyPassword(request.getPassword(), user.getPasswordHash())) {
+            registerFailedAttempt(user);
+            throw new BadCredentialsException("Invalid credentials");
+        }
+
+        if (Boolean.FALSE.equals(user.getActive())) {
+            throw new BadCredentialsException("Invalid credentials");
+        }
+
+        // Success: reset counters, unlock, and transparently upgrade legacy hashes.
+        boolean dirty = false;
+        if (user.getFailedLoginAttempts() != null && user.getFailedLoginAttempts() != 0) {
+            user.setFailedLoginAttempts(0);
+            dirty = true;
+        }
+        if (user.getLockedUntil() != null) {
+            user.setLockedUntil(null);
+            dirty = true;
+        }
+        if (passwordUtils.isLegacyHash(user.getPasswordHash())) {
+            user.setPasswordHash(passwordUtils.hashPassword(request.getPassword()));
+            dirty = true;
+        }
+        if (dirty) {
+            userRepository.save(user);
+        }
         return user;
+    }
+
+    private void registerFailedAttempt(User user) {
+        int attempts = (user.getFailedLoginAttempts() == null ? 0 : user.getFailedLoginAttempts()) + 1;
+        user.setFailedLoginAttempts(attempts);
+        if (attempts >= MAX_FAILED_ATTEMPTS) {
+            user.setLockedUntil(LocalDateTime.now().plusMinutes(LOCK_MINUTES));
+        }
+        userRepository.save(user);
     }
 }

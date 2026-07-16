@@ -30,8 +30,9 @@ public class DoctorLabService {
     private final DoctorRepository doctorRepository;
     private final ExternalCatalogueClient catalogueClient;
 
-    // [A02][A04] Hardcoded signing key — checked into version control.
-    private static final String LAB_SIGN_KEY = "lab-sign-key-2024";
+    // Signing key injected from the environment — never committed, never returned.
+    @org.springframework.beans.factory.annotation.Value("${app.lab.sign.key}")
+    private String labSignKey;
 
     private static final Path IMAGING_DIR = Path.of("imaging");
 
@@ -94,24 +95,24 @@ public class DoctorLabService {
     // POST /api/doctor/lab-orders/{id}/sign
     // -------------------------------------------------------------------------
     //
-    // [A08] Signature = MD5(id : value : LAB_SIGN_KEY). MD5 is collision-broken;
-    //        the key is hardcoded and present in source. Anyone with the repo
-    //        can forge any signature.
-    // [A04] No PKCS#7, no public-key crypto, no certificate chain.
+    // Signature = HMAC-SHA256(id : value) keyed with the env-loaded secret.
     public LabOrderDto signOrder(Long id, Map<String, Object> body) {
         LabOrder order = orderRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Lab order not found: " + id));
         String value = body == null || body.get("value") == null
                 ? "" : body.get("value").toString();
         try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            md.update((order.getId() + ":" + value + ":" + LAB_SIGN_KEY).getBytes());
-            order.setSignatureMd5(HexFormat.of().formatHex(md.digest()));
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(
+                    labSignKey.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] out = mac.doFinal((order.getId() + ":" + value)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            order.setSignatureMd5(HexFormat.of().formatHex(out));
             order.setSignedValue(value);
             order.setStatus("SIGNED");
             return toOrderDto(orderRepository.save(order));
         } catch (Exception e) {
-            throw new RuntimeException("Sign failed: " + e.getMessage(), e);
+            throw new RuntimeException("Sign failed", e);
         }
     }
 

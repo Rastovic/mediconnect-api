@@ -59,7 +59,7 @@ public class LabResultService {
                                                String testCode,
                                                String status,
                                                Long patientId) {
-        String sql =
+        StringBuilder sql = new StringBuilder(
                 "SELECT lr.id, lr.patient_id, lr.lab_tech_id, lr.test_name, " +
                 "       lr.result_value, lr.unit, lr.reference_range, lr.status, " +
                 "       lr.test_date, lr.notes, lr.attachment_path, " +
@@ -67,13 +67,17 @@ public class LabResultService {
                 "FROM lab_results lr " +
                 "JOIN patients p ON lr.patient_id = p.id " +
                 "JOIN users up ON p.user_id = up.id " +
-                "WHERE lr.test_name       LIKE '%" + (testName != null ? testName : "") + "%' " + // [A05] string injection
-                "AND   lr.reference_range LIKE '%" + (testCode != null ? testCode : "") + "%' " + // [A05] string injection
-                "AND   lr.status          LIKE '%" + (status   != null ? status   : "") + "%' " + // [A05] string injection
-                // [A01] null patientId → no filter → all patients' results exposed to any caller
-                (patientId != null ? "AND lr.patient_id = " + patientId : ""); // [A05] no quotes — UNION-ready
+                "WHERE lr.test_name LIKE ? AND lr.reference_range LIKE ? AND lr.status LIKE ? ");
+        java.util.List<Object> args = new java.util.ArrayList<>();
+        args.add("%" + (testName != null ? testName : "") + "%");
+        args.add("%" + (testCode != null ? testCode : "") + "%");
+        args.add("%" + (status != null ? status : "") + "%");
+        if (patientId != null) {
+            sql.append("AND lr.patient_id = ? ");
+            args.add(patientId);
+        }
 
-        return jdbcTemplate.query(sql, (rs, rowNum) -> LabResultDto.builder()
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> LabResultDto.builder()
                 .id(rs.getLong("id"))
                 .patientId(rs.getLong("patient_id"))
                 .patientName(rs.getString("patient_name"))
@@ -86,7 +90,7 @@ public class LabResultService {
                 .resultDate(rs.getObject("test_date", LocalDateTime.class))
                 .notes(rs.getString("notes"))
                 .attachmentPath(rs.getString("attachment_path"))
-                .build());
+                .build(), args.toArray());
     }
 
     // [A01] IDOR — nema provere da li je autentifikovani korisnik vlasnik ovog nalaza
@@ -116,23 +120,40 @@ public class LabResultService {
         LabResult lr = labResultRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Lab result not found: " + id));
 
-        // [A05] getOriginalFilename() — potpuno pod kontrolom napadača, bez sanitizacije
-        String filename = file.getOriginalFilename();
+        String ext = safeExtension(file.getOriginalFilename());
+        String safeName = java.util.UUID.randomUUID() + (ext.isEmpty() ? "" : "." + ext);
+        Path base = Paths.get(uploadDir).toAbsolutePath().normalize();
+        Path destination = base.resolve(safeName).normalize();
+        if (!destination.startsWith(base)) {
+            throw new SecurityException("Path traversal");
+        }
+        Files.createDirectories(base);
+        Files.copy(file.getInputStream(), destination);
 
-        // [A05] Direktna konkatenacija — nema normalize(), nema UUID prefiksa
-        // Sigurno: String filename = UUID.randomUUID() + "_" + originalName;
-        String storagePath = uploadDir + filename;
-        Path destination = Paths.get(storagePath);
-
-        Files.createDirectories(destination.getParent());
-        // [A05] REPLACE_EXISTING — legitimni fajl može biti preguzan
-        Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
-
-        lr.setAttachmentPath(storagePath);
+        lr.setAttachmentPath(destination.toString());
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(Files.readAllBytes(destination));
+            lr.setContentHash(java.util.HexFormat.of().formatHex(digest));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IOException(e);
+        }
         labResultRepository.save(lr);
+        return destination.toString();
+    }
 
-        // [A04] Puna putanja vraćena klijentu — otkriva strukturu fajl sistema
-        return storagePath;
+    private static final java.util.Set<String> ALLOWED_EXT =
+            java.util.Set.of("pdf", "png", "jpg", "jpeg", "dcm");
+
+    private String safeExtension(String originalName) {
+        if (originalName == null) return "";
+        int dot = originalName.lastIndexOf('.');
+        if (dot < 0 || dot == originalName.length() - 1) return "";
+        String ext = originalName.substring(dot + 1).toLowerCase();
+        if (!ext.matches("[a-z0-9]{1,5}") || !ALLOWED_EXT.contains(ext)) {
+            throw new IllegalArgumentException("Unsupported file type");
+        }
+        return ext;
     }
 
     // [A05] Path Traversal (read) — filePath parametar korišćen verbatim.
@@ -145,14 +166,18 @@ public class LabResultService {
     //    filePath = /tmp/mediconnect/uploads/../../application.yaml
     //
     //  Nema: path.toAbsolutePath().normalize().startsWith(base) provere.
-    public byte[] downloadFile(String filePath) throws IOException {
-        // [A05] Paths.get() prima string direktno — nema boundary check
-        Path path = Paths.get(filePath);
-
-        if (!Files.exists(path)) {
-            throw new RuntimeException("File not found: " + filePath);
+    public byte[] downloadFile(Long id) throws IOException {
+        LabResult lr = labResultRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Lab result not found: " + id));
+        String stored = lr.getAttachmentPath();
+        if (stored == null || stored.isBlank()) {
+            throw new RuntimeException("No attachment");
         }
-        // [A05] Čita bilo koji fajl dostupan JVM procesu bez ograničenja
+        Path base = Paths.get(uploadDir).toAbsolutePath().normalize();
+        Path path = Paths.get(stored).toAbsolutePath().normalize();
+        if (!path.startsWith(base) || !Files.exists(path)) {
+            throw new SecurityException("Path traversal");
+        }
         return Files.readAllBytes(path);
     }
 

@@ -1,32 +1,38 @@
 package com.mediconnect.dto;
 
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-// [A07] Mass Assignment: 'role' field accepts a value directly from the client.
-//        No @Valid or any validation annotation — length, format,
-//        and password complexity are not checked.
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 public class RegisterRequest {
 
-    // Optional — if absent, username is derived from email by AuthService
+    // Optional — if absent, username is derived from email by AuthService.
+    @Size(min = 3, max = 40)
     private String username;
 
-    // [A07] Accepted by the deserializer but never stored — silently ignored by AuthService.
-    //        Demonstrates mass assignment: extra fields in the request body raise no error.
     private String firstName;
     private String lastName;
 
+    @NotBlank
+    @Email
     private String email;
 
-    // [A07] No @Size, @Pattern or @NotBlank — "1" is accepted as a valid password
+    // Min 12 chars with upper, lower and a digit.
+    @NotBlank
+    @Size(min = 12)
+    @Pattern(regexp = "^(?=.*[A-Z])(?=.*[a-z])(?=.*\\d).+$",
+             message = "must contain upper, lower and a digit")
     private String password;
 
-    // [A07] Client chooses their own role — can send "ADMIN" to gain admin privileges
-    private String role;
+    // NOTE: no `role` field. Registration always creates a PATIENT account;
+    // the client cannot choose its own role (mass-assignment fix).
 }

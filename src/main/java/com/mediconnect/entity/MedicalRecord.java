@@ -42,9 +42,12 @@ public class MedicalRecord {
     @Column(columnDefinition = "TEXT")
     private String prescription;
 
-    // [A08] Stored without a content_hash — file tampering is undetectable
     @Column(length = 500)
     private String attachmentPath;
+
+    // SHA-256 of the stored attachment — lets a download be integrity-checked.
+    @Column(length = 64)
+    private String contentHash;
 
     private LocalDateTime createdAt;
 

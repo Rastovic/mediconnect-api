@@ -27,6 +27,7 @@ public class AdminBroadcastService {
 
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
+    private final SanitizerService sanitizer;
 
     // [A05][A07] Broadcast — `subject` + `html` written verbatim into
     //              Message.content; recipient inbox renders via dangerouslySetInnerHTML.
@@ -34,8 +35,8 @@ public class AdminBroadcastService {
     //              recipient's inbox attributed to a user the attacker chose
     //              (compounds the existing senderId spoofing surface, #88).
     public Map<String, Object> broadcast(Map<String, Object> body) {
-        String subject = (String) body.getOrDefault("subject", "");
-        String html    = (String) body.getOrDefault("html", "");
+        String subject = sanitizer.text((String) body.getOrDefault("subject", ""));
+        String html    = sanitizer.clean((String) body.getOrDefault("html", ""));
         // [A07] senderId from body — no JWT lookup. Default to user #1 (admin
         //        from the seed). Attacker can attribute the broadcast to any
         //        user, e.g. their own doctor account.

@@ -8,7 +8,10 @@ import org.springframework.security.authentication.dao.DaoAuthenticationProvider
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.password.NoOpPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -22,6 +25,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -35,13 +39,14 @@ public class SecurityConfig {
             //        from any origin can be triggered without a CSRF token.
             .csrf(AbstractHttpConfigurer::disable)
 
-            // [A04] All security response headers disabled:
-            //        - No Strict-Transport-Security (HSTS)
-            //        - No Content-Security-Policy (CSP)
-            //        - No X-Frame-Options       → clickjacking possible
-            //        - No X-Content-Type-Options → MIME sniffing possible
-            //        - No Referrer-Policy
-            .headers(AbstractHttpConfigurer::disable)
+            // Standard security response headers.
+            .headers(headers -> headers
+                .frameOptions(frame -> frame.deny())
+                .contentTypeOptions(Customizer.withDefaults())
+                .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31536000))
+                .referrerPolicy(rp -> rp.policy(ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'; frame-ancestors 'none'"))
+            )
 
             // [A05] CORS with wildcard configuration applied globally
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -50,20 +55,14 @@ public class SecurityConfig {
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
             .authorizeHttpRequests(auth -> auth
-                // [A01] Admin routes open to everyone — no ADMIN role enforcement.
-                //        Any unauthenticated request to /api/admin/** is permitted.
-                .requestMatchers("/api/admin/**").permitAll()
-                // [A01][A10] Refill Queue is fully open — no authentication required
-                //        for create, dispense, retry, or delete. Compounds the
-                //        A10 Mishandling-of-Exceptional-Conditions surface in
-                //        RefillQueueService: anyone can submit `quantity: null` to
-                //        trigger the fail-open chain, and the "Force Concurrent
-                //        Dispense" button reproduces the CWE-362 race anonymously.
-                .requestMatchers("/api/refills/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
-                .requestMatchers("/actuator/**").permitAll()
-                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**").permitAll()
-                .anyRequest().permitAll()
+                .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/doctor/**").hasAnyRole("DOCTOR", "ADMIN")
+                // Everything else requires an authenticated principal; method-level
+                // @PreAuthorize (AuthzService) enforces per-resource ownership.
+                .anyRequest().authenticated()
             )
 
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

@@ -21,7 +21,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.stream.Collectors;
 
 @Service
@@ -216,11 +215,10 @@ public class AdminUserService {
     }
 
     private String generateRandomPassword() {
-        // [A06] Random.nextInt — not SecureRandom. Predictable from process state.
-        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        Random r = new Random();
-        StringBuilder sb = new StringBuilder(12);
-        for (int i = 0; i < 12; i++) sb.append(alphabet.charAt(r.nextInt(alphabet.length())));
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+        java.security.SecureRandom r = new java.security.SecureRandom();
+        StringBuilder sb = new StringBuilder(16);
+        for (int i = 0; i < 16; i++) sb.append(alphabet.charAt(r.nextInt(alphabet.length())));
         return sb.toString();
     }
 
@@ -232,8 +230,6 @@ public class AdminUserService {
                 .firstName(u.getFirstName())
                 .lastName(u.getLastName())
                 .phone(u.getPhone())
-                // [A06] passwordHash included — no @JsonIgnore
-                .passwordHash(u.getPasswordHash())
                 .role(u.getRole())
                 .active(u.getActive())
                 .createdAt(u.getCreatedAt())

@@ -2,67 +2,72 @@ spring:
   application:
     name: mediconnect-api
 
-  # [A04] Hardcoded credentials in a plain-text configuration file committed to the repository
+  # Credentials via environment variables — never committed to source.
+  # Local dev: export DB_USERNAME=root DB_PASSWORD=root
   datasource:
     url: jdbc:mysql://localhost:3306/mediconnect_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-    username: root
-    password: root
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
-    # [A04] SQL schema visible in logs — leaks database structure and bound parameter values
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
     hibernate:
-      # [A04] ddl-auto: update — Hibernate alters the schema on startup, bypassing Flyway migration control
-      ddl-auto: update
+      # Flyway owns the schema. validate = Hibernate never mutates it.
+      ddl-auto: validate
 
   flyway:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
-    # Checksum mismatches from comment-only edits (OWASP 2021 → 2025 renumbering)
-    # are repaired on every startup by FlywayConfig.repairAndMigrate().
 
   servlet:
     multipart:
-      # [A08] CWE-400 Uncontrolled Resource Consumption — no file-size ceiling.
-      #        An attacker uploads a multi-gigabyte file; the JVM buffers it in heap
-      #        (ContentCachingFilter has no contentCacheLimit either), causing OOM.
-      #        Spring Boot default is 1MB/10MB; -1 disables the limit entirely.
-      max-file-size: -1
-      max-request-size: -1
+      max-file-size: 10MB
+      max-request-size: 15MB
 
-  # [A04] Thymeleaf cache disabled — supports Server-Side Template Injection exploration
   thymeleaf:
-    cache: false
+    cache: true
 
   mvc:
     pathmatch:
-      use-suffix-pattern: true
+      use-suffix-pattern: false
 
-# [A04] All Actuator endpoints publicly exposed without authentication
+# Actuator: expose only health + info; details only for authorized principals.
 management:
   endpoints:
     web:
       exposure:
-        include: '*'
+        include: health,info
   endpoint:
     health:
-      show-details: always
+      show-details: when_authorized
     env:
-      show-values: always
+      show-values: never
+
+# Application secrets — all injected from the environment, no fallbacks.
+# JWT_SECRET: base64 of >= 32 random bytes (openssl rand -base64 48)
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+  prescription:
+    sign:
+      key: ${PRESC_SIGN_KEY}
+  lab:
+    sign:
+      key: ${LAB_SIGN_KEY}
 
 server:
   port: 8085
-  # [A04] Full stack trace and internal error messages exposed to the client
+  # No internal error detail leaks to clients.
   error:
-    include-stacktrace: always
-    include-message: always
-    include-binding-errors: always
-    include-exception: true
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
 
 springdoc:
   api-docs:
@@ -73,8 +78,6 @@ springdoc:
 
 logging:
   level:
-    root: DEBUG
-    com.mediconnect: DEBUG
-    org.hibernate.SQL: DEBUG
-    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
-    org.springframework.security: DEBUG
+    root: INFO
+    com.mediconnect: INFO
+    org.springframework.security: WARN

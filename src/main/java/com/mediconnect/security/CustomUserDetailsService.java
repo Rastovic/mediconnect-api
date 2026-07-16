@@ -14,13 +14,10 @@ public class CustomUserDetailsService implements UserDetailsService {
 
     private final UserRepository userRepository;
 
-    // [A07] User Enumeration: UsernameNotFoundException message includes the username.
-    //        Spring Security forwards this message to the response by default when
-    //        server.error.include-message=always is set — confirms whether a username exists.
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+                .orElseThrow(() -> new UsernameNotFoundException("Invalid credentials"));
         return new UserPrincipal(user);
     }
 }

@@ -53,4 +53,7 @@ public class LabResult {
 
     @Column(length = 500)
     private String attachmentPath;
+
+    @Column(length = 64)
+    private String contentHash;
 }

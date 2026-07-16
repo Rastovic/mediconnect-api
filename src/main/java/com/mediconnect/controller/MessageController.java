@@ -5,6 +5,7 @@ import com.mediconnect.dto.MessageDto;
 import com.mediconnect.service.MessageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,6 +22,7 @@ public class MessageController {
 
     // [A01] userId query param not verified against JWT — any user can fetch any other user's conversations
     @GetMapping("/conversations")
+    @PreAuthorize("@authz.isSelf(authentication,#userId) or @authz.isAdmin(authentication)")
     public ResponseEntity<List<ConversationDto>> getConversations(@RequestParam Long userId) {
         return ResponseEntity.ok(messageService.getConversations(userId));
     }
@@ -51,6 +53,7 @@ public class MessageController {
     //          GET /api/messages/conversation/3?viewerId=1  → reads user 1 ↔ user 3 conversation
     //          (iterate userId to harvest all private medical conversations)
     @GetMapping("/conversation/{userId}")
+    @PreAuthorize("@authz.isSelf(authentication,#viewerId) or @authz.isAdmin(authentication)")
     public ResponseEntity<List<MessageDto>> getConversation(
             @PathVariable Long userId,
             @RequestParam Long viewerId) {
@@ -63,20 +66,21 @@ public class MessageController {
     //
     //        Attack: DELETE /api/messages/42  → deletes message 42 regardless of sender.
     @DeleteMapping("/{id}")
+    @PreAuthorize("@authz.canViewMessage(authentication,#id)")
     public ResponseEntity<Void> deleteMessage(@PathVariable Long id) {
         messageService.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/inbox/{userId}")
+    @PreAuthorize("@authz.isSelf(authentication,#userId) or @authz.isAdmin(authentication)")
     public ResponseEntity<List<MessageDto>> getInbox(@PathVariable Long userId) {
-        // [A01] No check that userId matches the authenticated caller
         return ResponseEntity.ok(messageService.getInbox(userId));
     }
 
     @PatchMapping("/{id}/read")
+    @PreAuthorize("@authz.canViewMessage(authentication,#id)")
     public ResponseEntity<MessageDto> markAsRead(@PathVariable Long id) {
-        // [A01] No check that the caller is the receiver of this message
         return ResponseEntity.ok(messageService.markAsRead(id));
     }
 }

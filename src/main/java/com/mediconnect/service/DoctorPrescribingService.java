@@ -119,7 +119,7 @@ public class DoctorPrescribingService {
     public PrescriptionSignatureDto sign(Long id) {
         Prescription rx = prescriptionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Prescription not found: " + id));
-        String sig = signer.md5Signature(rx);
+        String sig = signer.signature(rx);
         rx.setSignatureMd5(sig);
         rx.setSignedAt(LocalDateTime.now());
         prescriptionRepository.save(rx);
@@ -127,7 +127,6 @@ public class DoctorPrescribingService {
                 .prescriptionId(rx.getId())
                 .signatureMd5(sig)
                 .signedPayload(signer.signedPayload(rx))
-                .signingKey(PrescriptionSigner.SECRET)
                 .signedAt(rx.getSignedAt())
                 .coSignerUsername(rx.getCoSignerUsername())
                 .build();
@@ -211,19 +210,13 @@ public class DoctorPrescribingService {
         byte[] bytes = catalogueClient.fetchBytes(catalogueUrl, hdr);
         String raw = new String(bytes, StandardCharsets.UTF_8);
         result.put("rawResponse", raw);
-        // [A05] Nashorn evaluates the response verbatim — RCE pivot.
+        // The catalogue response is DATA, never code. Parse it as JSON; never eval.
         try {
-            ScriptEngineManager mgr = new ScriptEngineManager();
-            ScriptEngine js = mgr.getEngineByName("nashorn");
-            if (js == null) js = mgr.getEngineByName("javascript");
-            if (js == null) js = mgr.getEngineByName("JavaScript");
-            Object evaluated = js == null ? raw : js.eval(raw);
-            result.put("normalized", evaluated == null ? null : evaluated.toString());
+            Object parsed = new com.fasterxml.jackson.databind.ObjectMapper().readValue(raw, Object.class);
+            result.put("normalized", parsed);
             result.put("status", "ok");
         } catch (Exception e) {
-            // [A10] Raw exception message bubbles to caller.
-            result.put("status", "eval-error");
-            result.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
+            result.put("status", "unparseable");
         }
         return result;
     }
@@ -240,8 +233,11 @@ public class DoctorPrescribingService {
                 .orElseThrow(() -> new RuntimeException("Prescription not found: " + id));
         String jwt = body == null || body.get("jwt") == null ? null : body.get("jwt").toString();
         String sub = jwtVerifier.extractSubjectUnsafe(jwt);
+        if (sub == null) {
+            throw new RuntimeException("Invalid co-signer credentials");
+        }
         rx.setSignatureJwt(jwt);
-        rx.setCoSignerUsername(sub == null ? "unknown" : sub);
+        rx.setCoSignerUsername(sub);
         return toDto(prescriptionRepository.save(rx));
     }
 

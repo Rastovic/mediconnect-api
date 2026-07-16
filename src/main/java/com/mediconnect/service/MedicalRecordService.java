@@ -89,26 +89,47 @@ public class MedicalRecordService {
         MedicalRecord record = medicalRecordRepository.findById(recordId)
                 .orElseThrow(() -> new RuntimeException("Medical record not found: " + recordId));
 
-        // [A05] getOriginalFilename() — fully attacker-controlled value, no sanitization
-        String filename = file.getOriginalFilename();
+        // Server-generated filename — the client name is never used for the path.
+        String ext = safeExtension(file.getOriginalFilename());
+        String safeName = java.util.UUID.randomUUID() + (ext.isEmpty() ? "" : "." + ext);
 
-        // [A05] Direct string concatenation — no Paths.get(uploadDir).resolve() with
-        //        toAbsolutePath().normalize() and startsWith(uploadDir) check
-        String storagePath = uploadDir + filename;
-        Path destination = Paths.get(storagePath);
+        Path base = Paths.get(uploadDir).toAbsolutePath().normalize();
+        Path destination = base.resolve(safeName).normalize();
+        if (!destination.startsWith(base)) {
+            throw new SecurityException("Path traversal");
+        }
 
-        Files.createDirectories(destination.getParent());
-        // [A05] REPLACE_EXISTING — attacker can overwrite arbitrary files if path traversal succeeds
-        Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
+        Files.createDirectories(base);
+        Files.copy(file.getInputStream(), destination);
 
-        // [A08] content_hash intentionally not computed or persisted
-        // Secure: String hash = DigestUtils.md5DigestAsHex(file.getBytes());
-        //         record.setContentHash(hash);
-
-        record.setAttachmentPath(storagePath);
+        record.setAttachmentPath(destination.toString());
+        record.setContentHash(sha256(destination));
         medicalRecordRepository.save(record);
 
-        return storagePath;
+        return destination.toString();
+    }
+
+    private String sha256(Path p) throws IOException {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(p));
+            return java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IOException(e);
+        }
+    }
+
+    private static final java.util.Set<String> ALLOWED_EXT =
+            java.util.Set.of("pdf", "png", "jpg", "jpeg", "dcm");
+
+    private String safeExtension(String originalName) {
+        if (originalName == null) return "";
+        int dot = originalName.lastIndexOf('.');
+        if (dot < 0 || dot == originalName.length() - 1) return "";
+        String ext = originalName.substring(dot + 1).toLowerCase();
+        if (!ext.matches("[a-z0-9]{1,5}") || !ALLOWED_EXT.contains(ext)) {
+            throw new IllegalArgumentException("Unsupported file type");
+        }
+        return ext;
     }
 
     // [A05] Path Traversal read vector — filePath query parameter used directly.
@@ -121,20 +142,19 @@ public class MedicalRecordService {
     //
     //  No canonical path check, no startsWith(uploadDir) boundary enforcement,
     //  no check that the record's own attachmentPath matches filePath.
-    public byte[] downloadAttachment(String filePath) throws IOException {
-        // [A05] filePath taken verbatim from query parameter — attacker controls the path
-        Path path = Paths.get(filePath);
-
-        // Secure implementation would require:
-        //   Path canonical = path.toAbsolutePath().normalize();
-        //   Path base      = Paths.get(uploadDir).toAbsolutePath().normalize();
-        //   if (!canonical.startsWith(base)) throw new SecurityException("Path traversal");
-
-        if (!Files.exists(path)) {
-            throw new RuntimeException("File not found: " + filePath);
+    /** Reads the attachment for a record from its stored path only — no client-supplied path. */
+    public byte[] downloadAttachment(Long recordId) throws IOException {
+        MedicalRecord record = medicalRecordRepository.findById(recordId)
+                .orElseThrow(() -> new RuntimeException("Medical record not found: " + recordId));
+        String stored = record.getAttachmentPath();
+        if (stored == null || stored.isBlank()) {
+            throw new RuntimeException("No attachment");
         }
-
-        // [A05] Reads any file accessible to the JVM process — no boundary check
+        Path base = Paths.get(uploadDir).toAbsolutePath().normalize();
+        Path path = Paths.get(stored).toAbsolutePath().normalize();
+        if (!path.startsWith(base) || !Files.exists(path)) {
+            throw new SecurityException("Path traversal");
+        }
         return Files.readAllBytes(path);
     }
 

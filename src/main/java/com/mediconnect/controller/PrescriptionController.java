@@ -4,6 +4,7 @@ import com.mediconnect.dto.PrescriptionDto;
 import com.mediconnect.service.PrescriptionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,6 +32,7 @@ public class PrescriptionController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("@authz.canViewPrescription(authentication,#id)")
     public ResponseEntity<PrescriptionDto> getById(@PathVariable Long id) {
         // [A01] No check that the caller is the patient or prescribing doctor
         return ResponseEntity.ok(prescriptionService.findById(id));

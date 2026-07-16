@@ -48,10 +48,15 @@ public class AdminOpsService {
 
         // [A03] `since` concatenated directly — SELECT count UNION exfil possible
         String failedLoginsSql = "SELECT COUNT(*) FROM users WHERE failed_login_attempts > 0";
-        if (since != null && !since.isBlank()) {
-            failedLoginsSql += " AND created_at >= '" + since + "'";
+        boolean hasSince = since != null && !since.isBlank();
+        if (hasSince) {
+            failedLoginsSql += " AND created_at >= ?1";
         }
-        long failedLogins = ((Number) entityManager.createNativeQuery(failedLoginsSql).getSingleResult()).longValue();
+        Query flq = entityManager.createNativeQuery(failedLoginsSql);
+        if (hasSince) {
+            flq.setParameter(1, since);
+        }
+        long failedLogins = ((Number) flq.getSingleResult()).longValue();
 
         long locked = userRepository.findAll().stream()
                 .filter(u -> u.getLockedUntil() != null && u.getLockedUntil().isAfter(LocalDateTime.now()))
@@ -145,85 +150,28 @@ public class AdminOpsService {
         return props;
     }
 
-    // [A02][A09] Runtime mutation of any Spring property. Caller can flip
-    //              `app.debug.enabled`, `logging.level.root`, server config —
-    //              and most relevantly turn LoggingInterceptor output off so
-    //              their own subsequent actions never reach audit_logs.
+    // Retired: runtime property mutation could disable audit logging and is
+    // impossible to make safe. Configuration is immutable at runtime.
     public Map<String, Object> setConfig(AbstractEnvironment environment, String key, String value) {
-        MutablePropertySources sources = environment.getPropertySources();
-        Map<String, Object> overrides = new HashMap<>();
-        // Reuse an existing overlay source if we've added one already
-        if (sources.contains("admin-runtime-overrides")) {
-            Object src = sources.get("admin-runtime-overrides").getSource();
-            if (src instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> existing = (Map<String, Object>) src;
-                overrides.putAll(existing);
-            }
-            sources.remove("admin-runtime-overrides");
-        }
-        overrides.put(key, value);
-        // [A02] Overlay added at the top of the property source list so it
-        //        overrides application.yaml and OS env vars.
-        sources.addFirst(new MapPropertySource("admin-runtime-overrides", overrides));
-        return Map.of("key", key, "value", value, "overrideCount", overrides.size());
+        throw new UnsupportedOperationException("Runtime configuration override is disabled");
     }
 
-    // [A03] Run arbitrary SQL with the application's DB user (root in dev).
-    //        SELECT returns rows; UPDATE/DELETE/DROP return affected count.
-    //        Equivalent to RCE for the database.
-    @Transactional
+    // Retired: arbitrary SQL execution is equivalent to DB RCE and has no safe form.
     public Map<String, Object> runSql(String sql) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("sql", sql);
-        try {
-            String trimmed = sql.trim().toLowerCase();
-            if (trimmed.startsWith("select") || trimmed.startsWith("show") || trimmed.startsWith("describe")) {
-                Query q = entityManager.createNativeQuery(sql);
-                @SuppressWarnings("unchecked")
-                List<Object> rows = q.getResultList();
-                List<List<Object>> safeRows = rows.stream().map(r -> {
-                    if (r == null) return List.<Object>of();
-                    if (r.getClass().isArray()) return Arrays.asList((Object[]) r);
-                    return List.<Object>of(r);
-                }).collect(Collectors.toList());
-                result.put("type", "rows");
-                result.put("rowCount", safeRows.size());
-                result.put("rows", safeRows);
-            } else {
-                int affected = entityManager.createNativeQuery(sql).executeUpdate();
-                result.put("type", "update");
-                result.put("affected", affected);
-            }
-        } catch (Exception e) {
-            // [A10] raw SQL exception text returned — confirms table/column names
-            result.put("type", "error");
-            result.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
-        return result;
+        throw new UnsupportedOperationException("Direct SQL execution is disabled");
     }
 
-    // [A04] Hard restart — invokes System.exit so the supervisor restarts the JVM.
-    //        No role check, no rate limit. Reachable by any caller.
+    // Retired: process-level restart via System.exit is a self-inflicted DoS.
     public void restart() {
-        // Run on a separate thread so the HTTP response can still be flushed
-        new Thread(() -> {
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-            System.exit(0);
-        }, "admin-restart").start();
+        throw new UnsupportedOperationException("Runtime restart is disabled");
     }
 
-    // [A03] Command Injection — `mysqldump` invoked with the dbName argument
-    //        spliced into the command list. If the caller controls dbName
-    //        (which they do — it's a query param) they can append shell
-    //        metacharacters via env-var defaults / mysql client tricks.
-    //
-    //  Demo payload:
-    //    GET /api/admin/maintenance/backup?dbName=mediconnect_db;cat%20/etc/passwd
-    //  Then look in the response body for the appended output.
-    public String backup(String dbName) {
+    // Backup is invoked with a fixed, hardcoded database name and NO shell,
+    // so no part of the command comes from the request (command-injection fix).
+    public String backup(String dbNameIgnored) {
         try {
-            ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", "mysqldump --no-create-db " + dbName);
+            ProcessBuilder pb = new ProcessBuilder(
+                    "mysqldump", "--no-create-db", "--single-transaction", "mediconnect_db");
             pb.redirectErrorStream(true);
             Process p = pb.start();
             StringBuilder sb = new StringBuilder();
@@ -237,8 +185,7 @@ public class AdminOpsService {
             p.waitFor();
             return sb.toString();
         } catch (Exception e) {
-            // [A10] raw exception text returned to caller
-            return "Backup failed: " + e.getMessage();
+            return "Backup failed";
         }
     }
 

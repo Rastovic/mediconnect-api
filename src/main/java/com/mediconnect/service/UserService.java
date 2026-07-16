@@ -84,7 +84,6 @@ public class UserService {
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
                 .phone(user.getPhone())
-                .passwordHash(user.getPasswordHash())   // [A06] exposed
                 .role(user.getRole())
                 .active(user.getActive())
                 .createdAt(user.getCreatedAt())

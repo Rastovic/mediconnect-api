@@ -47,8 +47,8 @@ public class AppointmentService {
                      "JOIN users ud   ON d.user_id    = ud.id " +
                      "JOIN patients p ON a.patient_id = p.id " +
                      "JOIN users up   ON p.user_id    = up.id " +
-                     // [A05] raw string concatenation — no PreparedStatement placeholder
-                     "WHERE ud.last_name LIKE '%" + doctorName + "%'";
+                     "WHERE ud.last_name LIKE ?";
+        String like = "%" + (doctorName != null ? doctorName : "") + "%";
 
         return jdbcTemplate.query(sql, (rs, rowNum) -> {
             LocalDateTime requestedDate = rs.getObject("requested_date", LocalDateTime.class);
@@ -64,7 +64,7 @@ public class AppointmentService {
                     .notes(rs.getString("notes"))
                     .createdAt(rs.getObject("created_at", LocalDateTime.class))
                     .build();
-        });
+        }, like);
     }
 
     // [A01] IDOR — no verification that the authenticated caller is the patient

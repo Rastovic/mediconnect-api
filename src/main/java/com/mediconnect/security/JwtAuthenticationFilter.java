@@ -2,9 +2,11 @@ package com.mediconnect.security;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -13,7 +15,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -22,56 +23,61 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final CustomUserDetailsService userDetailsService;
 
-    // [A07] Paths where token expiry validation is intentionally skipped.
-    //        An attacker with an expired token can still authenticate against these routes.
-    private static final List<String> SKIP_EXPIRY_PATHS = List.of(
-            "/api/public/",
-            "/api/legacy/",
-            "/api/reports/"
-    );
-
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
 
-        String authHeader = request.getHeader("Authorization");
+        String token = resolveToken(request);
 
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        // No token → continue as anonymous; access control decides the outcome.
+        if (token == null) {
             chain.doFilter(request, response);
             return;
         }
 
-        String token = authHeader.substring(7);
-        String requestURI = request.getRequestURI();
-
         try {
-            // extractUsername calls the parser — throws if token is invalid or expired
+            // Signature + expiry are always verified. No path is exempt.
             String username = jwtUtil.extractUsername(token);
-
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-
-                boolean skipExpiry = SKIP_EXPIRY_PATHS.stream().anyMatch(requestURI::contains);
-
-                if (skipExpiry) {
-                    // [A07] Expiry not validated for these paths — expired tokens are accepted.
-                    //        An attacker who obtained a token months ago can still use it here.
+                if (jwtUtil.validateToken(token, userDetails)) {
                     setAuthentication(request, userDetails);
                 } else {
-                    if (jwtUtil.validateToken(token, userDetails)) {
-                        setAuthentication(request, userDetails);
-                    }
+                    unauthorized(response);
+                    return;
                 }
             }
         } catch (Exception e) {
-            // [A07] All token parsing exceptions swallowed silently.
-            //        A malformed or tampered token does not produce an error response —
-            //        the request continues as unauthenticated, which combined with
-            //        permitAll() routes means it still reaches the controller.
+            // A present-but-invalid token is rejected, never silently ignored.
+            unauthorized(response);
+            return;
         }
 
         chain.doFilter(request, response);
+    }
+
+    /** Cookie `token` takes precedence; falls back to the Authorization header. */
+    private String resolveToken(HttpServletRequest request) {
+        if (request.getCookies() != null) {
+            for (Cookie c : request.getCookies()) {
+                if ("token".equals(c.getName()) && c.getValue() != null && !c.getValue().isBlank()) {
+                    return c.getValue();
+                }
+            }
+        }
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            return authHeader.substring(7);
+        }
+        return null;
+    }
+
+    private void unauthorized(HttpServletResponse response) throws IOException {
+        SecurityContextHolder.clearContext();
+        response.setStatus(HttpStatus.UNAUTHORIZED.value());
+        response.setContentType("application/json");
+        response.getWriter().write("{\"error\":\"Unauthorized\"}");
     }
 
     private void setAuthentication(HttpServletRequest request, UserDetails userDetails) {

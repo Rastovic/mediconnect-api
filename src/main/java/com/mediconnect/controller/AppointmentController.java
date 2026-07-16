@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -40,6 +41,7 @@ public class AppointmentController {
     //        the doctor on this appointment. Any authenticated (or unauthenticated,
     //        given SecurityConfig.permitAll) user can retrieve any appointment by id.
     @GetMapping("/{id}")
+    @PreAuthorize("@authz.canViewAppointment(authentication,#id)")
     public ResponseEntity<AppointmentDto> getAppointmentById(@PathVariable Long id) {
         return ResponseEntity.ok(appointmentService.findById(id));
     }
@@ -50,6 +52,7 @@ public class AppointmentController {
     //        A billing attack: {"status":"COMPLETED"} on an already COMPLETED appointment
     //        re-triggers completion logic if any downstream listener relies on this event.
     @PutMapping("/{id}/status")
+    @PreAuthorize("@authz.canEditAppointment(authentication,#id)")
     public ResponseEntity<AppointmentDto> updateStatus(
             @PathVariable Long id,
             @RequestBody Map<String, String> body) {
@@ -65,6 +68,7 @@ public class AppointmentController {
     //        (change diagnosis, medication dosage, appointment date) and the
     //        client has no mechanism to detect the modification.
     @GetMapping("/{id}/pdf")
+    @PreAuthorize("@authz.canViewAppointment(authentication,#id)")
     public ResponseEntity<byte[]> downloadPdf(@PathVariable Long id) {
         byte[] pdfBytes = appointmentService.generatePdf(id);
 
@@ -85,6 +89,7 @@ public class AppointmentController {
     // [A01] IDOR — no ownership check. Any authenticated user can update any appointment.
     //        Only future appointments are allowed to be updated (date/notes).
     @PutMapping("/{id}")
+    @PreAuthorize("@authz.canEditAppointment(authentication,#id)")
     public ResponseEntity<?> updateAppointment(
             @PathVariable Long id,
             @RequestBody AppointmentDto dto) {
@@ -98,6 +103,7 @@ public class AppointmentController {
     // [A01] No ownership check — any authenticated user can cancel any appointment.
     //        Caller identity is never verified against patient or doctor on this record.
     @PatchMapping("/{id}/cancel")
+    @PreAuthorize("@authz.canViewAppointment(authentication,#id)")
     public ResponseEntity<AppointmentDto> cancelAppointment(@PathVariable Long id) {
         return ResponseEntity.ok(appointmentService.cancel(id));
     }

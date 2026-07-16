@@ -105,13 +105,24 @@ public class DoctorReferralService {
         if (b64 == null || b64.isBlank() || "BENIGN_PLACEHOLDER".equals(b64)) return null;
         try {
             byte[] bytes = Base64.getDecoder().decode(b64);
-            // [A08] No ObjectInputFilter, no class allow-list.
             try (ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(bytes))) {
+                // Strict allow-list: only ReferralBundle + String/primitives may be
+                // deserialized. Anything else (gadget chains) is rejected before instantiation.
+                ois.setObjectInputFilter(filterInfo -> {
+                    Class<?> c = filterInfo.serialClass();
+                    if (c == null) return java.io.ObjectInputFilter.Status.ALLOWED;
+                    if (c == ReferralBundle.class
+                            || c == String.class
+                            || Number.class.isAssignableFrom(c)) {
+                        return java.io.ObjectInputFilter.Status.ALLOWED;
+                    }
+                    return java.io.ObjectInputFilter.Status.REJECTED;
+                });
                 Object o = ois.readObject();
                 if (o instanceof ReferralBundle b) return b;
             }
         } catch (Exception e) {
-            // [A10] Silent — decode failures stored only as `decodeStatus`.
+            // Decode failures are recorded as decodeStatus, not surfaced to the caller.
         }
         return null;
     }

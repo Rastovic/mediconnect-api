@@ -6,7 +6,10 @@ import com.mediconnect.entity.Message;
 import com.mediconnect.entity.User;
 import com.mediconnect.repository.MessageRepository;
 import com.mediconnect.repository.UserRepository;
+import com.mediconnect.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -21,6 +24,7 @@ public class MessageService {
 
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
+    private final SanitizerService sanitizer;
 
     // [A05] Stored XSS — content is written to the database verbatim without any sanitization.
     //
@@ -36,20 +40,30 @@ public class MessageService {
     //  Secure: senderId must be read exclusively from the JWT SecurityContext;
     //          content must be sanitized (e.g., Jsoup.clean() with a strict whitelist).
     public MessageDto send(MessageDto dto) {
-        User sender = userRepository.findById(dto.getSenderId())
-                .orElseThrow(() -> new RuntimeException("Sender not found: " + dto.getSenderId()));
+        // Sender is the authenticated principal — never taken from the request body.
+        Long senderId = currentUserId();
+        User sender = userRepository.findById(senderId)
+                .orElseThrow(() -> new RuntimeException("Sender not found"));
         User receiver = userRepository.findById(dto.getReceiverId())
                 .orElseThrow(() -> new RuntimeException("Receiver not found: " + dto.getReceiverId()));
 
         Message message = Message.builder()
                 .sender(sender)
                 .receiver(receiver)
-                // [A05] content stored verbatim — <script>, <img onerror=>, <svg onload=> all pass through
-                .content(dto.getContent())
+                // Sanitised on write (defense-in-depth); messages are plain text.
+                .content(sanitizer.text(dto.getContent()))
                 .sentAt(LocalDateTime.now())
                 .build();
 
         return toDto(messageRepository.save(message));
+    }
+
+    private Long currentUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !(auth.getPrincipal() instanceof UserPrincipal p)) {
+            throw new RuntimeException("Not authenticated");
+        }
+        return p.getUser().getId();
     }
 
     // [A01] IDOR — viewerId is accepted as a parameter and never verified against

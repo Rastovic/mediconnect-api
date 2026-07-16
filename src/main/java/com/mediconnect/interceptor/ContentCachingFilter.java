@@ -50,22 +50,21 @@ public class ContentCachingFilter implements Filter {
         HttpServletRequest  httpRequest  = (HttpServletRequest)  request;
         HttpServletResponse httpResponse = (HttpServletResponse) response;
 
-        // [A08] No contentCacheLimit argument — entire body buffered without bound.
-        //        Attack: send Content-Length: 2147483647 (2 GB) → JVM heap exhausted.
-        //        Even without Content-Length, a chunked-transfer stream is read until EOF.
-        ContentCachingRequestWrapper  cachedRequest  = new ContentCachingRequestWrapper(httpRequest);
+        // Do not buffer multipart uploads — let them stream straight through so
+        // file uploads are not capped by the 64 KB body-cache limit below.
+        String contentType = httpRequest.getContentType();
+        if (contentType != null && contentType.toLowerCase().startsWith("multipart/")) {
+            chain.doFilter(httpRequest, httpResponse);
+            return;
+        }
 
-        // [A08] Response body also buffered without limit — a large API response
-        //        (e.g., GET /api/users returning 100 000 records) is held in heap twice:
-        //        once by the controller and once by this wrapper before copyBodyToResponse().
+        // Bounded request buffer (64 KB) — caps memory an attacker can force us to hold.
+        ContentCachingRequestWrapper  cachedRequest  = new ContentCachingRequestWrapper(httpRequest, 64 * 1024);
         ContentCachingResponseWrapper cachedResponse = new ContentCachingResponseWrapper(httpResponse);
 
         try {
             chain.doFilter(cachedRequest, cachedResponse);
         } finally {
-            // Copy the buffered response bytes to the actual response stream.
-            // If OutOfMemoryError is thrown inside chain.doFilter(), this line
-            // may never execute — the client receives an abrupt connection reset.
             cachedResponse.copyBodyToResponse();
         }
     }
