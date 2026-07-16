@@ -78,3 +78,10 @@ logging:
     org.hibernate.SQL: DEBUG
     org.hibernate.type.descriptor.sql.BasicBinder: TRACE
     org.springframework.security: DEBUG
+
+# [A02] CTF flag placement (#64 a02-config-secrets-dump). Seeded internal secret
+#        exposed by GET /api/admin/config (raw Environment dump) and by
+#        /actuator/env (show-values: always). Capture = reading it there.
+mediconnect:
+  internal:
+    metadata-token: flag{a02_config_secrets_dump_caf015}

@@ -75,6 +75,15 @@ public class AppointmentService {
         return toDto(appointment);
     }
 
+    // [A01] IDOR — appointments returned for whatever patientId the caller passes.
+    //        No check that the authenticated caller owns this patientId, so switching
+    //        the id in the request reads another patient's appointment list.
+    public List<AppointmentDto> findByPatientId(Long patientId) {
+        return appointmentRepository.findByPatientId(patientId).stream()
+                .map(this::toDto)
+                .toList();
+    }
+
     // [A02] No state machine — status is written directly from the request string
     //        without checking the current state or allowed transitions.
     //        Valid business transitions: REQUESTED → APPROVED → COMPLETED
@@ -88,7 +97,17 @@ public class AppointmentService {
                 .orElseThrow(() -> new RuntimeException("Appointment not found: " + id));
 
         // [A02] No validation of previous state, no role check on who can make this transition
-        appointment.setStatus(AppointmentStatus.valueOf(status));
+        AppointmentStatus previous = appointment.getStatus();
+        AppointmentStatus next = AppointmentStatus.valueOf(status);
+        // [CTF][A06 #43] Behavioral: a terminal state (COMPLETED/CANCELLED) moving
+        // back to an open state is an impossible transition that only a missing
+        // state machine allows. Mark it; flag via GET /api/ctf/behavior/a06-missing-state-machine-appointment.
+        boolean fromTerminal = previous == AppointmentStatus.COMPLETED || previous == AppointmentStatus.CANCELLED;
+        boolean toOpen = next == AppointmentStatus.REQUESTED || next == AppointmentStatus.APPROVED;
+        if (fromTerminal && toOpen) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a06-missing-state-machine-appointment");
+        }
+        appointment.setStatus(next);
         return toDto(appointmentRepository.save(appointment));
     }
 

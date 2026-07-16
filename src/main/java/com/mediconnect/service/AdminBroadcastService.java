@@ -78,6 +78,12 @@ public class AdminBroadcastService {
             sent++;
         }
 
+        // [CTF][A06 #187] Behavioral: an uncapped broadcast that fans out to the
+        // whole user base (no recipient/size limit) is the amplification finding.
+        if (sendToAll && sent >= 3) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a06-unbounded-fan-out");
+        }
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sent", sent);
         result.put("roles", sendToAll ? List.of("ALL") : roles);
@@ -97,6 +103,12 @@ public class AdminBroadcastService {
         String replacement = body != null && body.get("content") instanceof String
                 ? (String) body.get("content")
                 : "<em>[redacted]</em>";
+        // [CTF][A08 #188] Behavioral: overwriting a non-empty original in place
+        // (no history / redacted_at) irreversibly loses the prior content.
+        String original = m.getContent();
+        if (original != null && !original.isBlank() && !original.equals(replacement)) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a08-overwrite-in-place-redact");
+        }
         m.setContent(replacement);
         messageRepository.save(m);
 

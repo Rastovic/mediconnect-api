@@ -56,6 +56,11 @@ public class PrescriptionService {
         User pharmacist = userRepository.findById(pharmacistId)
                 .orElseThrow(() -> new RuntimeException("Pharmacist not found: " + pharmacistId));
 
+        // [CTF][A06 #59] Behavioral: dispensing an already-DISPENSED prescription
+        // is an illegal second dispense that only a missing state machine allows.
+        if (prescription.getStatus() == PrescriptionStatus.DISPENSED) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a06-missing-state-machine-dispense");
+        }
         // [A02] Overwrites dispensedAt even if already DISPENSED
         prescription.setStatus(PrescriptionStatus.DISPENSED);
         prescription.setPharmacist(pharmacist);

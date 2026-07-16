@@ -72,11 +72,26 @@ public class RefillQueueService {
             List<RefillRequest> batch = refills
                     .findTop50ByStatusOrderByCreatedAtAsc(RefillStatus.REQUESTED);
             for (RefillRequest r : batch) {
+                // [A10][#130] A queued refill with the poison sentinel (requestedBy = -999)
+                //        makes the tick throw HERE - outside processOne's own try - so the
+                //        generic catch below eats it silently (the CWE-755 vuln). We first
+                //        move the poison row to a terminal status so it drops out of the
+                //        REQUESTED queue: the swallow-all is still demonstrated, but a single
+                //        poison can only cost the batch one tick, not stall the queue forever
+                //        (which would break every other refill challenge on a shared instance).
+                if (r.getRequestedBy() != null && r.getRequestedBy() == -999L) {
+                    r.setStatus(RefillStatus.FAILED);
+                    r.setFailureReason("worker tick poison consumed (CTF #130)");
+                    refills.save(r);
+                    throw new IllegalStateException("worker tick poisoned by refill " + r.getId());
+                }
                 processOne(r);
             }
         } catch (Exception e) {
             // [A10] CWE-755 — generic catch, swallowed exception, no rethrow.
             //        Original stack trace is printed to System.err only.
+            // [CTF][A10 #130] The swallow-all just hid a real tick failure. Mark it.
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a10-swallow-all-in-background-worker");
             e.printStackTrace();
         }
     }
@@ -103,6 +118,9 @@ public class RefillQueueService {
         } catch (Exception e) {
             // [A10] FAIL-OPEN — any exception is treated as success.
             //        This is the worst-case CWE-636 / CWE-755 pattern.
+            // [CTF][A10 #128] Behavioral: the validator threw but the refill was
+            // promoted to READY anyway (fail-open). Mark it.
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a10-fail-open-promote-on-exception");
             r.setFailureReason(e.toString());        // [A09] raw exception text stored
             r.setStatus(RefillStatus.READY);         // [A10] fail open
         }
@@ -135,6 +153,13 @@ public class RefillQueueService {
 
         if (r.getStatus() != RefillStatus.READY) {
             throw new IllegalStateException("not ready");
+        }
+
+        // [CTF][A10 #131] Behavioral TOCTOU: a sequential second dispense is
+        // blocked by the guard above, so two callers past this point for the same
+        // id can only be a genuine race. Count passes per id; >=2 means the race won.
+        if (com.mediconnect.ctf.CtfBehaviorRegistry.bump("refill-dispense-" + id) >= 2) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a10-toctou-race-double-dispense");
         }
 
         // simulated inventory I/O — intentionally widens the race window

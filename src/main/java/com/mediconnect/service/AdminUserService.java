@@ -21,7 +21,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.stream.Collectors;
 
 @Service
@@ -155,7 +154,8 @@ public class AdminUserService {
                 .orElseThrow(() -> new RuntimeException("User not found: " + id));
         String newPassword = (suppliedPassword != null && !suppliedPassword.isBlank())
                 ? suppliedPassword
-                : generateRandomPassword();
+                // [A04 #153] Predictable-RNG reset: seed is a pure function of the user id.
+                : com.mediconnect.ctf.PredictablePasswordGen.forUser(id);
         String hash = passwordUtils.hashPassword(newPassword);
         user.setPasswordHash(hash);
         user.setFailedLoginAttempts(0);
@@ -178,6 +178,9 @@ public class AdminUserService {
     public ImpersonationResponseDto impersonate(Long id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found: " + id));
+        // [CTF][A01 #151] Behavioral: minting a full token for another identity
+        // with no impersonated_by claim / audit is the auth-context takeover.
+        com.mediconnect.ctf.CtfBehaviorRegistry.mark("a01-auth-context-takeover-impersonation");
         UserPrincipal principal = new UserPrincipal(user);
         String token = jwtUtil.generateToken(principal);
         return ImpersonationResponseDto.builder()
@@ -213,15 +216,6 @@ public class AdminUserService {
                 .orElseThrow(() -> new RuntimeException("User not found: " + id));
         user.setActive(!Boolean.TRUE.equals(user.getActive()));
         return toDto(userRepository.save(user));
-    }
-
-    private String generateRandomPassword() {
-        // [A06] Random.nextInt — not SecureRandom. Predictable from process state.
-        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        Random r = new Random();
-        StringBuilder sb = new StringBuilder(12);
-        for (int i = 0; i < 12; i++) sb.append(alphabet.charAt(r.nextInt(alphabet.length())));
-        return sb.toString();
     }
 
     private UserDto toDto(User u) {

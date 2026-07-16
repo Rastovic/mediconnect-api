@@ -63,6 +63,10 @@ public class AuthService {
     // [A07] No rate limiting — unlimited attempts (brute-force / credential stuffing).
     public User login(LoginRequest request) {
 
+        String attempted = (request.getEmail() != null && !request.getEmail().isBlank())
+                ? request.getEmail()
+                : request.getUsername();
+
         // Prefer email lookup (frontend sends email); fall back to username for legacy clients
         User user;
         if (request.getEmail() != null && !request.getEmail().isBlank()) {
@@ -77,9 +81,29 @@ public class AuthService {
                             new RuntimeException("User not found: " + request.getUsername()));
         }
 
+        String raw = request.getPassword();
+        boolean md5Match = passwordUtils.matches(raw, user.getPasswordHash());
+        // [A02][#32] NoOpPasswordEncoder compares candidate vs stored VALUE as plaintext.
+        //        Submitting the leaked password_hash (harvested via #11) as the password
+        //        therefore authenticates - no cracking needed. Models the encoder path.
+        boolean noOpMatch = raw != null && raw.equals(user.getPasswordHash());
+
         // Message 2 — confirms that the user EXISTS but the password is wrong
-        if (!passwordUtils.matches(request.getPassword(), user.getPasswordHash())) {
+        if (!md5Match && !noOpMatch) {
+            // [A07][#25] The lookup succeeded but the password failed, so the caller just
+            //        got the distinct "Invalid password" (not "User not found") message —
+            //        that is the enumeration oracle confirming this account EXISTS. Marking
+            //        here (rather than on every successful login) keeps it precise to the probe.
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a07-user-enumeration");
+            // [A07][#27] No throttle/lockout: count consecutive failed attempts for this
+            //        account. Passing the threshold proves brute-force is unimpeded.
+            if (com.mediconnect.ctf.CtfBehaviorRegistry.bump("bruteforce:" + attempted) >= 5) {
+                com.mediconnect.ctf.CtfBehaviorRegistry.mark("a07-no-login-rate-limiting");
+            }
             throw new RuntimeException("Invalid password");
+        }
+        if (!md5Match && noOpMatch) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a02-nooppasswordencoder");
         }
 
         // Message 3 — confirms account EXISTS, password is CORRECT,
@@ -87,6 +111,17 @@ public class AuthService {
         if (user.getLockedUntil() != null
                 && user.getLockedUntil().isAfter(LocalDateTime.now())) {
             throw new RuntimeException("Account is locked until " + user.getLockedUntil());
+        }
+
+        // [A04][#20] Logging in as the seeded 'crackme' account proves its unsalted MD5
+        //        hash was cracked back to the plaintext (the hash is harvestable via #11).
+        if ("crackme".equals(user.getUsername())) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a04-md5-unsalted-passwords");
+        }
+        // [A04][#153] Logging in with exactly the password the predictable RNG would emit
+        //        for this user id means the reset value was reproduced offline.
+        if (raw != null && raw.equals(com.mediconnect.ctf.PredictablePasswordGen.forUser(user.getId()))) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a04-predictable-rng-on-reset");
         }
 
         return user;

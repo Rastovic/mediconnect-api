@@ -206,11 +206,11 @@ public class AdminOpsService {
     // [A04] Hard restart — invokes System.exit so the supervisor restarts the JVM.
     //        No role check, no rate limit. Reachable by any caller.
     public void restart() {
-        // Run on a separate thread so the HTTP response can still be flushed
-        new Thread(() -> {
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-            System.exit(0);
-        }, "admin-restart").start();
+        // [CTF][A02 #169] The destructive System.exit(0) is defused here (plan
+        // bucket 4 stability fix) so a demo cannot brick the app. Reaching this
+        // endpoint (permitAll, no role check) marks the behavioral challenge; the
+        // flag is awarded by GET /api/ctf/behavior/a02-destructive-ops-endpoint-system-exit.
+        com.mediconnect.ctf.CtfBehaviorRegistry.mark("a02-destructive-ops-endpoint-system-exit");
     }
 
     // [A03] Command Injection — `mysqldump` invoked with the dbName argument

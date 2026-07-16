@@ -231,6 +231,9 @@ public class DoctorRosterService {
     public HandoffTokenDto handoff(Long patientId, Long fromDoctorUserId) {
         Long fromId = fromDoctorUserId == null ? 0L : fromDoctorUserId;
         String token = handoffTokenIssuer.sign(patientId, fromId);
+        // [CTF][A09 #201] Behavioral: this high-risk patient handoff is issued with
+        // NO audit_logs entry. The absent record is the finding; mark it.
+        com.mediconnect.ctf.CtfBehaviorRegistry.mark("a09-silent-no-audit-on-high-risk-op");
         // [A02][A04] Plaintext token spliced into a URL — leaks via Referer,
         //             browser history, server access logs, screenshots.
         String url = "/doctor/handoff/accept?t=" + token;

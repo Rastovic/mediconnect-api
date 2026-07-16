@@ -65,6 +65,11 @@ public class UserService {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found: " + id));
         // [A01] No validation: caller can pass "ADMIN" and escalate privileges
+        // [CTF][A01 #38] Behavioral: escalating any account to ADMIN via this
+        // body-driven role change (no authority check) is the mass-assignment finding.
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a01-privilege-escalation-role-mass-assignment");
+        }
         user.setRole(Role.valueOf(role));
         return toDto(userRepository.save(user));
     }

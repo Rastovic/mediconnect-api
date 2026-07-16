@@ -36,6 +36,7 @@ public class DoctorPrescribingService {
     private final UserRepository userRepository;
     private final PrescriptionSigner signer;
     private final JwtNoneVerifier jwtVerifier;
+    private final com.mediconnect.ctf.repository.CtfSecretRepository ctfSecrets;
     private final ExternalCatalogueClient catalogueClient;
 
     // -------------------------------------------------------------------------
@@ -92,6 +93,14 @@ public class DoctorPrescribingService {
             conn.setDoOutput(true);
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
+            // [A10][#228] Blind SSRF exfil: the server attaches an internal signing
+            //        token to every outbound pharmacy POST. Point pharmacyCallbackUrl at
+            //        a listener you control and the token ships to you inside the request.
+            String internalToken = ctfSecrets.findByLabel("a10-blind-ssrf-via-outbound-post")
+                    .map(s -> s.getFlag()).orElse("");
+            conn.setRequestProperty("X-Internal-Signing-Token", internalToken);
+            // The server initiated an outbound POST to a caller-supplied URL.
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a10-blind-ssrf-via-outbound-post");
             String body = String.format(
                     "{\"prescriptionId\":%d,\"patientId\":%s,\"medication\":\"%s\",\"dosage\":\"%s\"}",
                     rx.getId(),
@@ -131,6 +140,41 @@ public class DoctorPrescribingService {
                 .signedAt(rx.getSignedAt())
                 .coSignerUsername(rx.getCoSignerUsername())
                 .build();
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /api/doctor/prescriptions/{id}/verify-signature
+    // -------------------------------------------------------------------------
+    //
+    // Body: {"medicationName":"<tampered>", "dosage":"<tampered>", "signatureMd5":"<recomputed>"}
+    //
+    // [A08][#225] Signature = MD5(id:med:dosage:SECRET) with a hardcoded key that
+    //        the /sign response already disclosed. An attacker tampers the content,
+    //        recomputes the MD5 with the leaked key, and this check accepts it as a
+    //        valid signature - no asymmetric primitive, no key custody. Mark on accept.
+    public Map<String, Object> verifySignature(Long id, Map<String, Object> body) {
+        Prescription rx = prescriptionRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Prescription not found: " + id));
+        String med = body == null || body.get("medicationName") == null ? "" : body.get("medicationName").toString();
+        String dose = body == null || body.get("dosage") == null ? "" : body.get("dosage").toString();
+        String supplied = body == null || body.get("signatureMd5") == null ? "" : body.get("signatureMd5").toString();
+
+        // Recompute over the CALLER-SUPPLIED content (not the stored record) with the hardcoded key.
+        Prescription tampered = new Prescription();
+        tampered.setId(rx.getId());
+        tampered.setMedicationName(med);
+        tampered.setDosage(dose);
+        String expected = signer.md5Signature(tampered);
+
+        boolean valid = expected.equalsIgnoreCase(supplied);
+        Map<String, Object> result = new HashMap<>();
+        result.put("prescriptionId", id);
+        result.put("valid", valid);
+        if (valid) {
+            // [A08] A forged-but-recomputed signature over tampered content was accepted.
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a08-weak-signing-md5-hardcoded-key");
+        }
+        return result;
     }
 
     // -------------------------------------------------------------------------
@@ -240,6 +284,27 @@ public class DoctorPrescribingService {
                 .orElseThrow(() -> new RuntimeException("Prescription not found: " + id));
         String jwt = body == null || body.get("jwt") == null ? null : body.get("jwt").toString();
         String sub = jwtVerifier.extractSubjectUnsafe(jwt);
+        // [CTF][A08 #210] Behavioral: co-sign accepted a token whose header is
+        // alg:none (unsigned) - forging any identity. Mark it.
+        if (jwt != null && sub != null) {
+            try {
+                String h = jwt.split("\\.")[0];
+                String pad = switch (h.length() % 4) { case 2 -> h + "=="; case 3 -> h + "="; default -> h; };
+                String header = new String(java.util.Base64.getUrlDecoder().decode(pad),
+                        java.nio.charset.StandardCharsets.UTF_8).toLowerCase();
+                if (header.contains("\"none\"")) {
+                    com.mediconnect.ctf.CtfBehaviorRegistry.mark("a08-alg-none-jwt");
+                }
+                // [CTF][A08 #19] The verifier never pins an algorithm, so a token whose
+                // header claims an asymmetric alg (RS*/ES*/PS*) is accepted just the same -
+                // the classic HS/RS key-confusion class. Mark it.
+                if (header.contains("\"rs256\"") || header.contains("\"rs384\"") || header.contains("\"rs512\"")
+                        || header.contains("\"es256\"") || header.contains("\"es384\"") || header.contains("\"es512\"")
+                        || header.contains("\"ps256\"") || header.contains("\"ps384\"") || header.contains("\"ps512\"")) {
+                    com.mediconnect.ctf.CtfBehaviorRegistry.mark("a08-jwt-algorithm-confusion");
+                }
+            } catch (Exception ignored) { /* detection only */ }
+        }
         rx.setSignatureJwt(jwt);
         rx.setCoSignerUsername(sub == null ? "unknown" : sub);
         return toDto(prescriptionRepository.save(rx));

@@ -89,17 +89,42 @@ public class MedicalRecordService {
         MedicalRecord record = medicalRecordRepository.findById(recordId)
                 .orElseThrow(() -> new RuntimeException("Medical record not found: " + recordId));
 
+        // [A08][#50] Replacing an existing artifact with no content_hash check — the
+        //        swap is accepted silently, proving upload integrity is unverifiable.
+        boolean replacingExisting = record.getAttachmentPath() != null;
+
         // [A05] getOriginalFilename() — fully attacker-controlled value, no sanitization
         String filename = file.getOriginalFilename();
+
+        // [A05][#46] No extension/MIME allow-list — a disallowed executable type is accepted.
+        if (filename != null) {
+            String lower = filename.toLowerCase();
+            for (String ext : new String[]{".php", ".jsp", ".jspx", ".exe", ".sh", ".jar", ".svg", ".html", ".phtml", ".bat"}) {
+                if (lower.endsWith(ext)) {
+                    com.mediconnect.ctf.CtfBehaviorRegistry.mark("a05-unrestricted-file-upload");
+                    break;
+                }
+            }
+        }
 
         // [A05] Direct string concatenation — no Paths.get(uploadDir).resolve() with
         //        toAbsolutePath().normalize() and startsWith(uploadDir) check
         String storagePath = uploadDir + filename;
         Path destination = Paths.get(storagePath);
 
+        // [A05][#47] Traversal filename escapes the upload dir — the write lands outside uploadDir.
+        Path uploadBase = Paths.get(uploadDir).toAbsolutePath().normalize();
+        if (!destination.toAbsolutePath().normalize().startsWith(uploadBase)) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a05-path-traversal-write");
+        }
+
         Files.createDirectories(destination.getParent());
         // [A05] REPLACE_EXISTING — attacker can overwrite arbitrary files if path traversal succeeds
         Files.copy(file.getInputStream(), destination, StandardCopyOption.REPLACE_EXISTING);
+
+        if (replacingExisting) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a08-missing-content-hash-unsigned-artifact");
+        }
 
         // [A08] content_hash intentionally not computed or persisted
         // Secure: String hash = DigestUtils.md5DigestAsHex(file.getBytes());

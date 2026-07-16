@@ -265,14 +265,22 @@ public class DoctorAppointmentService {
         StringBuilder sb = new StringBuilder();
         sb.append("id,patientName,doctorName,status,scheduledAt,notes,declineReason\r\n");
         for (Appointment a : rows) {
+            String patientCell = safe(fullName(a.getPatient() == null ? null : a.getPatient().getUser()));
+            String notesCell = safe(a.getNotes());
+            String declineCell = safe(a.getDeclineReason());
+            // [A05][#264] Any attacker-controlled cell written with a leading =/+/-/@ is a
+            //        live spreadsheet formula on open — the export never neutralises it.
+            if (isFormula(patientCell) || isFormula(notesCell) || isFormula(declineCell)) {
+                com.mediconnect.ctf.CtfBehaviorRegistry.mark("a05-csv-formula-injection");
+            }
             sb.append(a.getId()).append(',')
-              .append(safe(fullName(a.getPatient() == null ? null : a.getPatient().getUser()))).append(',')
+              .append(patientCell).append(',')
               .append(safe(fullName(a.getDoctor()  == null ? null : a.getDoctor().getUser()))).append(',')
               .append(a.getStatus()).append(',')
               .append(a.getRequestedDate()).append(',')
               // [A03] notes written verbatim. =cmd|'/c calc'!A1 → RCE on Excel.
-              .append(safe(a.getNotes())).append(',')
-              .append(safe(a.getDeclineReason()))
+              .append(notesCell).append(',')
+              .append(declineCell)
               .append("\r\n");
         }
         return sb.toString();
@@ -298,6 +306,13 @@ public class DoctorAppointmentService {
         if (s == null) return "";
         // [A03] We DO NOT strip leading =/+/-/@ — that's the formula-injection demo.
         return s.replace("\r", " ").replace("\n", " ").replace(",", ";");
+    }
+
+    // [A05][#264] A cell that opens with =/+/-/@ executes as a formula in Excel/LibreOffice.
+    private boolean isFormula(String cell) {
+        if (cell == null || cell.isEmpty()) return false;
+        char c = cell.charAt(0);
+        return c == '=' || c == '+' || c == '-' || c == '@';
     }
 
     private String fullName(User u) {

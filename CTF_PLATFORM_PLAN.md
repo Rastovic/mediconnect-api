@@ -76,7 +76,7 @@ Deliverable per flag for the thesis: not just "the flag," but a short **exploita
 | Instructor control | **Settings panel** — toggle which categories/challenges are open per session/student. This *is* the gating mechanism now. |
 | Flag count | **Quality-driven, uneven per category** (~45-55 total). Keep every *distinct, interesting* exploit; rich categories (A01/A05/A08/A10) carry more, lean ones (A03/A09) fewer. No forced 3-per-category. |
 | Duplicate policy | **Hybrid - "exploit ⇒ flag, or it's fixed." No silent dead-ends.** Identical patterns across N endpoints share one flag (any path captures it); a duplicate with a distinct twist is promoted to its own flag; a boring near-duplicate with no teaching value is fixed on the ctf-platform branch. |
-| Scoring & hints | **E/M/H = 100/200/300.** Hints are **opt-in**: a student clicks to reveal one, which deducts a point. Progressive (multiple hints per challenge allowed). |
+| Scoring & hints | **E/M/H = 100/200/300.** Hints are **opt-in**: a student clicks to reveal one. Cost **scales with the challenge** (a flat -1 is meaningless against a 300-pt challenge), e.g. each revealed hint deducts **25% of that challenge's value**, progressive (multiple hints allowed), with a floor so a fully-hinted solve still scores (e.g. min 25% retained). Pick exact numbers during Phase 3. |
 | Reset / replay | **Yes, per-challenge reset** so challenges can be replayed (useful for demoing). Plus a separate re-seed / DB-reset to recover polluted app state (risk in Risks section). |
 | Cross-category lenses | #229 to A03 (RCE); SSRF taught via #220/#228 in A10. #226/#217 to A08. #148/#176 to A09. |
 | Build direction | Build `ctf-platform` **from the `fixed` branch** (start remediated, re-open the 53) rather than fixing ~120 on top of the vulnerable base. Same end state, less error-prone. |
@@ -100,12 +100,10 @@ The categories used below follow the OWASP Top 10 2025 list. **Before finalizing
 
 Both repos branch from their current state before any CTF work.
 
-**Backend** (`mediconnect-api`) — already a git repo, currently on branch `vulnerable` with uncommitted changes:
+**Backend** (`mediconnect-api`) - git repo, branch `vulnerable`, **tree now clean and pushed** (baseline = commit `55f83d8`, `VULN_FIX_MAP.md` tracked, highest migration `V25` so CTF `V26` is valid). No stash dance needed:
 ```bash
 cd /Users/jelenarastovic/Downloads/mediconnect-api
-git stash            # or commit the in-flight changes first — decide what to keep
 git checkout -b ctf-platform vulnerable
-git stash pop        # if stashed
 ```
 
 **Frontend** (`mediconnect-frontend`) — **not under git yet.** Initialize first:
@@ -138,7 +136,7 @@ Keeping the vulnerable base preserved gives the thesis its before/after: **base 
 Deployment is local and honor-based, exactly like OWASP Juice Shop: the student has the source, the DB, and the filesystem, so scoring **cannot** and **does not need to** be tamper-proof. Forging progress only cheats yourself. This is the established, citable model for deliberately-vulnerable training apps, and it removes the "hardened scoring layer" complexity entirely.
 
 Best-effort measures we still keep (for cleanliness, not as a security boundary):
-- **Flag hashes, not plaintext, in `ctf_challenge`.** Salted hash + metadata. Keeps a casual `SELECT` from spoiling every answer at once. Not claimed to resist a determined local user.
+- **Flag hashes, not plaintext, in `ctf_challenge`.** Per-row salted **sha256** (or bcrypt), never MD5. Keeps a casual `SELECT` from spoiling every answer at once. Not claimed to resist a determined local user. (Deliberately NOT the weak hash students crack in #20/#153, so the verification layer isn't itself a trivially-broken artifact in the thesis.)
 - **Flag plaintext lives at the exploit's endpoint** (record, file, internal endpoint, log line), so the *intended* way to get it is the exploit.
 - **`/api/ctf/**` requires the logged-in user** — enough to keep progress coherent, not a wall.
 
@@ -150,7 +148,7 @@ Accepted and documented, not fought:
 New Flyway migration `V26__ctf_platform.sql` + standard layered code. New tables:
 
 - **`ctf_challenge`** — `id, slug, owasp_category (A01..A10), title, difficulty (EASY|MEDIUM|HARD), points, summary, objective, target_hint, flag_hash, flag_salt, intended_path (text), is_core (bool), sort_order`.
-- **`ctf_progress`** — `id, user_id, challenge_id, status (LOCKED|OPEN|SOLVED), solved_at, attempts`. Keyed by `user_id` so a central board is a later join, not a migration. LOCKED/OPEN is derived from `ctf_settings`.
+- **`ctf_progress`** - `id, user_id, challenge_id, solved (bool), solved_at, attempts`. Keyed by `user_id` so a central board is a later join, not a migration. **Persist only the solved fact**; LOCKED/OPEN is derived at read time from `ctf_settings` (never stored, to avoid stale gating state when settings change).
 - **`ctf_settings`** — instructor overrides: `key, value` (e.g. `gating_enabled=true`, `open_categories=A01,A02`, per-challenge force-open). **This is the entire gating mechanism** — no lesson-completion dependency.
 - **`ctf_submission`** — `id, user_id, challenge_id, submitted_flag_hash, correct (bool), created_at` — full attempt log (also demonstrates good logging, a nice A09 counterpoint).
 
@@ -343,7 +341,7 @@ Framing that makes this defensible as a master's thesis rather than an app:
 
 Resolved: lessons out of scope (thesis + `fixed` branch cover remediation); A03 planted-dependency challenge kept **and confirmed black-box** (fingerprint via actuator/stacktrace, exploit Nashorn RCE over HTTP, §6 A03); XSS goes **server-side stored-payload detection** (Playwright bot demoted to optional Layer-2 showpiece).
 
-Resolved: hints (opt-in click, -1 pt), reset/replay (yes + re-seed), points (100/200/300), cross-category lenses, build-from-fixed, **XSS = server-side detection (no browser required)**, grading model (local honor-based / Juice Shop), non-flagged fate (fix boring dead-ends, keep cool demonstration-only vulns), **flag count = 53** (§6.1; supersedes every stale "30" figure), **behavioral-vs-retrieval tagging budgeted** (Phase 1b), **DB re-seed control** added (§12.4).
+Resolved: hints (opt-in click, cost scales with challenge value e.g. -25% per hint, exact numbers in Phase 3), reset/replay (yes + re-seed), points (100/200/300), cross-category lenses, build-from-fixed, **XSS = server-side detection (no browser required)**, grading model (local honor-based / Juice Shop), non-flagged fate (fix boring dead-ends, keep cool demonstration-only vulns), **flag count = 53** (§6.1; supersedes every stale "30" figure), **behavioral-vs-retrieval tagging budgeted** (Phase 1b), **DB re-seed control** added (§12.4).
 
 Still open:
 1. **Plan file home:** this plan currently lives in the backend repo. Move it somewhere neutral, or keep a copy in each repo?

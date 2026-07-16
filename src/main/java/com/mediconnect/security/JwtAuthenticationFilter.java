@@ -45,18 +45,29 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = authHeader.substring(7);
         String requestURI = request.getRequestURI();
 
+        boolean skipExpiry = SKIP_EXPIRY_PATHS.stream().anyMatch(requestURI::contains);
+
         try {
-            // extractUsername calls the parser — throws if token is invalid or expired
-            String username = jwtUtil.extractUsername(token);
+            String username = null;
+            try {
+                // extractUsername calls the parser — throws if token is invalid or expired
+                username = jwtUtil.extractUsername(token);
+            } catch (io.jsonwebtoken.ExpiredJwtException expired) {
+                if (skipExpiry) {
+                    // [A07] Expiry not validated for these paths — an expired token is
+                    //        accepted anyway. The parser rejects it, so we recover the
+                    //        subject straight from the expired claims and authenticate as
+                    //        that user. Someone who grabbed a token months ago still gets in.
+                    username = expired.getClaims().getSubject();
+                    com.mediconnect.ctf.CtfBehaviorRegistry.mark("a07-expiry-skip-path-bypass");
+                }
+                // non-skip path: expiry correctly rejected — leave unauthenticated.
+            }
 
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
-                boolean skipExpiry = SKIP_EXPIRY_PATHS.stream().anyMatch(requestURI::contains);
-
                 if (skipExpiry) {
-                    // [A07] Expiry not validated for these paths — expired tokens are accepted.
-                    //        An attacker who obtained a token months ago can still use it here.
                     setAuthentication(request, userDetails);
                 } else {
                     if (jwtUtil.validateToken(token, userDetails)) {
@@ -64,11 +75,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     }
                 }
             }
+        } catch (io.jsonwebtoken.ExpiredJwtException ignoredExpiry) {
+            // Expiry is a normal condition, not a fail-open — do not mark #34.
+        } catch (org.springframework.security.core.userdetails.UsernameNotFoundException userMissing) {
+            // Token parsed fine but the subject no longer exists (e.g. a deleted user, or
+            // an expired token recovered on a skip-expiry path). That is not the malformed-
+            // token fail-open case — do not mark #34 (avoids double-marking with #33).
         } catch (Exception e) {
-            // [A07] All token parsing exceptions swallowed silently.
+            // [A07][#34] All other token parsing exceptions swallowed silently.
             //        A malformed or tampered token does not produce an error response —
             //        the request continues as unauthenticated, which combined with
             //        permitAll() routes means it still reaches the controller.
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a07-fail-open-token-validation");
         }
 
         chain.doFilter(request, response);

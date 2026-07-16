@@ -32,3 +32,9 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# CTF: runtime-materialised flag files (plaintext); source is in src/main/resources/ctf-flags/
+/ctf-flags/
+
+# CTF authoring tooling (flag plaintext, dev only)
+/ctf-tooling/

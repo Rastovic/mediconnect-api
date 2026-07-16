@@ -36,6 +36,19 @@ public class MessageService {
     //  Secure: senderId must be read exclusively from the JWT SecurityContext;
     //          content must be sanitized (e.g., Jsoup.clean() with a strict whitelist).
     public MessageDto send(MessageDto dto) {
+        // [CTF][A01 #56] Behavioral: senderId comes from the body, never the JWT.
+        // If it differs from the authenticated caller, the message is spoofed as
+        // someone else.
+        try {
+            var auth = org.springframework.security.core.context.SecurityContextHolder
+                    .getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof com.mediconnect.security.UserPrincipal up
+                    && up.getUser() != null && dto.getSenderId() != null
+                    && !dto.getSenderId().equals(up.getUser().getId())) {
+                com.mediconnect.ctf.CtfBehaviorRegistry.mark("a01-identity-spoofing-via-request-body");
+            }
+        } catch (Exception ignored) { /* detection only, never blocks the vuln */ }
+
         User sender = userRepository.findById(dto.getSenderId())
                 .orElseThrow(() -> new RuntimeException("Sender not found: " + dto.getSenderId()));
         User receiver = userRepository.findById(dto.getReceiverId())

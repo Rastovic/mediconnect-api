@@ -112,6 +112,10 @@ public class DoctorReferralService {
             }
         } catch (Exception e) {
             // [A10] Silent — decode failures stored only as `decodeStatus`.
+            // [CTF][A10 #254] Behavioral: a non-empty payload that fails to decode
+            // is swallowed and returns null (no error), driving the unchecked-null
+            // path downstream. Mark it.
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a10-silent-null-on-failed-decode");
         }
         return null;
     }

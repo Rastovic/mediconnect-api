@@ -10,8 +10,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 //        which polls the refill queue every 30 s. The worker swallows every exception
 //        in a single catch (Exception), so any failure during a tick is silently lost.
 @SpringBootApplication(scanBasePackages = "com.mediconnect")
-@EntityScan("com.mediconnect.entity")
-@EnableJpaRepositories("com.mediconnect.repository")
+@EntityScan({"com.mediconnect.entity", "com.mediconnect.ctf.entity"})
+@EnableJpaRepositories({"com.mediconnect.repository", "com.mediconnect.ctf.repository"})
 @EnableScheduling
 public class MediconnectApiApplication {
 

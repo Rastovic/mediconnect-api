@@ -44,6 +44,14 @@ public class AppointmentController {
         return ResponseEntity.ok(appointmentService.findById(id));
     }
 
+    // [A01] IDOR — lists appointments for any patientId with no ownership check.
+    //        The frontend calls this with the logged-in patient's id; switching
+    //        the id in the request returns another patient's appointments.
+    @GetMapping("/patient/{patientId}")
+    public ResponseEntity<List<AppointmentDto>> getByPatient(@PathVariable Long patientId) {
+        return ResponseEntity.ok(appointmentService.findByPatientId(patientId));
+    }
+
     // [A02] No state machine — any status string is accepted without validating
     //        the current state or the role of the caller.
     //        A patient can send {"status":"APPROVED"} and approve their own appointment.

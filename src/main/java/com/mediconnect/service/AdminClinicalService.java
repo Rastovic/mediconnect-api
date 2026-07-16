@@ -54,6 +54,9 @@ public class AdminClinicalService {
     public Map<String, Object> forceDispense(Long id) {
         Prescription rx = prescriptionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Prescription not found: " + id));
+        // [CTF][A01 #173] Behavioral: force-dispense bypasses queue, validator and
+        // role - an illegitimate dispense.
+        com.mediconnect.ctf.CtfBehaviorRegistry.mark("a01-workflow-bypass-force-dispense");
         rx.setStatus(PrescriptionStatus.DISPENSED);
         rx.setDispensedAt(LocalDateTime.now());
         // [A08] pharmacist_id left as-is, even if it was set to a different user.
@@ -150,6 +153,11 @@ public class AdminClinicalService {
     public Map<String, Object> overrideLabResultValue(Long id, Map<String, Object> body) {
         LabResult lab = labResultRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Lab result not found: " + id));
+        // [CTF][A08 #177] Behavioral: mutating a clinical result value with no amend
+        // flag / no audit is undetectable tampering.
+        if (body.containsKey("resultValue")) {
+            com.mediconnect.ctf.CtfBehaviorRegistry.mark("a08-clinical-value-tamper-no-amend");
+        }
         if (body.containsKey("resultValue"))    lab.setResultValue(String.valueOf(body.get("resultValue")));
         if (body.containsKey("unit"))           lab.setUnit((String) body.get("unit"));
         if (body.containsKey("referenceRange")) lab.setReferenceRange((String) body.get("referenceRange"));

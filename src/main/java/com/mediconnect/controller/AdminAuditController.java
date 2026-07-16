@@ -48,12 +48,17 @@ public class AdminAuditController {
     // [A09] Selective tampering with the audit trail.
     @DeleteMapping("/{id}")
     public ResponseEntity<Map<String, Object>> delete(@PathVariable Long id) {
+        // [CTF][A09 #160] Behavioral: deleting a single audit record is selective
+        // tampering (harder to notice than a full wipe).
+        com.mediconnect.ctf.CtfBehaviorRegistry.mark("a09-selective-log-tampering");
         return ResponseEntity.ok(adminAuditService.deleteOne(id));
     }
 
     // [A09] Existing hard-purge — moved out of AdminController.
     @PostMapping("/clear")
     public ResponseEntity<Map<String, Object>> clear() {
+        // [CTF][A09 #65] Behavioral: wiping the whole audit trail destroys evidence.
+        com.mediconnect.ctf.CtfBehaviorRegistry.mark("a09-wipe-the-audit-trail");
         int deleted = adminAuditService.clearAll();
         return ResponseEntity.ok(Map.of(
                 "message", "All audit logs deleted",

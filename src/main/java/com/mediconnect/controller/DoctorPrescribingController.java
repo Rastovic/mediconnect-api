@@ -39,6 +39,14 @@ public class DoctorPrescribingController {
         return ResponseEntity.ok(service.sign(id));
     }
 
+    // [A08] MD5 + hardcoded-key signature verified by recompute — a tampered payload
+    //        re-signed with the leaked key is accepted as valid.
+    @PostMapping("/prescriptions/{id}/verify-signature")
+    public ResponseEntity<Map<String, Object>> verifySignature(@PathVariable Long id,
+                                                               @RequestBody Map<String, Object> body) {
+        return ResponseEntity.ok(service.verifySignature(id, body));
+    }
+
     // [A08] Unsigned PDF (no PKCS#7 wrapper, no certificate chain).
     @GetMapping("/prescriptions/{id}/pdf")
     public ResponseEntity<Resource> pdf(@PathVariable Long id) {
