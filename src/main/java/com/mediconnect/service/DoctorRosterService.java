@@ -233,15 +233,24 @@ public class DoctorRosterService {
     // POST /api/doctor/patients/{id}/handoff
     // -------------------------------------------------------------------------
     //
-    // [A08] Token signed with HMAC-SHA1 + hardcoded key + no expiry.
-    //        See HandoffTokenIssuer for the integrity-failure description.
-    // [A09] Issuance is NOT recorded in the audit log — handoff trail invisible.
+    // Handoff issuance is a high-risk operation, so it is recorded in the audit
+    // log. The token itself is never written to the audit row.
     public HandoffTokenDto handoff(Long patientId, Long fromDoctorUserId) {
         Long fromId = fromDoctorUserId == null ? 0L : fromDoctorUserId;
         String token = handoffTokenIssuer.sign(patientId, fromId);
-        // [A02][A04] Plaintext token spliced into a URL — leaks via Referer,
-        //             browser history, server access logs, screenshots.
         String url = "/doctor/handoff/accept?t=" + token;
+
+        User issuer = fromDoctorUserId == null ? null
+                : userRepository.findById(fromDoctorUserId).orElse(null);
+        auditLogRepository.save(AuditLog.builder()
+                .user(issuer)
+                .action("PATIENT_HANDOFF_ISSUED")
+                .entityType("Patient")
+                .entityId(patientId)
+                .details("Handoff token issued for patient " + patientId)
+                .createdAt(LocalDateTime.now())
+                .build());
+
         return HandoffTokenDto.builder()
                 .patientId(patientId)
                 .token(token)

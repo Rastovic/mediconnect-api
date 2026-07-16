@@ -41,7 +41,15 @@ in an isolated git worktree so the uncommitted `ctf-platform` tree is untouched.
   - Verified: `npm run build` (tsc -b && vite build) clean; `npm run lint` 0 errors (8 pre-existing warnings). NOT yet run live in a browser. All changes uncommitted on branch `fixed`.
   - Cookie-auth migration (3.4/3.5) still deferred (needs FE/BE lockstep, not flag-critical). JWT-in-localStorage + client-side `decodeJwtPayload` in AuthContext intentionally left as-is under that deferral.
 - [ ] Phase 4b carryover (see above): list-endpoint principal filtering + /me endpoints, doctor mutation row-ownership, delete verb GET->DELETE, FE route guards, impersonation reason+audit.
-- [ ] #160/#201 (audit coverage for privileged ops), XXE/SSTI hardening — not in the flagged-53, left for completeness pass.
+- [x] **A03/A09 in-53 gaps closed (the Doctor-Notes + Audit modules were skipped in the first BE pass).** These ARE among the 53, so the fixed reference now remediates all of them:
+  - #206 XXE (`DoctorNoteService.importXml`): DocumentBuilderFactory now sets disallow-doctype-decl + disables external general/parameter entities + external DTD load + XInclude + entity expansion; parser errors return a generic message. Verified LIVE: `file:///etc/passwd` entity payload -> generic "Request failed", no `root:` in response.
+  - #204 SSTI inline (`TemplateRenderer.renderInline` via `templateBody`): caller input is no longer executed as a template — it is HTML-escaped and returned as literal text. Verified LIVE: `${7*7}` -> escaped, `Execute?new()` payload -> escaped, neither evaluates.
+  - #205 SSTI path-traversal (`TemplateRenderer.renderByName` via `templateName`): name must be in an allow-list {soap,progress,triage}; anything else -> "Unknown template", so no filesystem path is built from caller input. Configuration also sets `ALLOWS_NOTHING_RESOLVER` + `setAPIBuiltinEnabled(false)` as defence in depth. Verified LIVE: `../../../../etc/passwd` rejected; valid `soap` template still renders.
+  - #65 + #160 audit tamper (`AdminAuditController`): removed `DELETE /api/admin/logs/{id}` and `POST /api/admin/logs/clear` — the audit trail is append-only. Verified LIVE: both verbs now 405, `GET /api/admin/logs` still 200, 0 rows deleted.
+  - #201 silent high-risk op (`DoctorRosterService.handoff`): issuance now writes a `PATIENT_HANDOFF_ISSUED` audit row (token NOT logged). Verified LIVE: handoff POST 200 + audit row present.
+  - GlobalExceptionHandler: added a `HttpRequestMethodNotSupportedException` -> 405 mapping (removed verbs were surfacing as generic 500).
+  - Compile + `package` clean on JDK 21; full live smoke on :8090 (mediconnect_fixed) green, regression on soap-render + doctor patient-list SQLi path OK.
+  - NOTE (not in the 53, still open for completeness): `HandoffTokenIssuer` still uses hardcoded HMAC-SHA1 + no expiry; `AdminAuditController.search` still concatenates q/action/from/to into native SQL; `DoctorNoteService.coSign` still uses `JwtNoneVerifier.extractSubjectUnsafe`; note create/import still stores raw body HTML (FE now escapes it). None is a flagged challenge.
 - [ ] Live-verify deserialization (#245) + SSRF (#220/#228) exploit paths end-to-end (code-verified only).
 
 ## Final sweep result

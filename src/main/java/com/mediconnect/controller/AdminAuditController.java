@@ -8,7 +8,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 // Module D — Audit & Forensics
 //
@@ -45,21 +44,8 @@ public class AdminAuditController {
         return ResponseEntity.ok(adminAuditService.findById(id));
     }
 
-    // [A09] Selective tampering with the audit trail.
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Map<String, Object>> delete(@PathVariable Long id) {
-        return ResponseEntity.ok(adminAuditService.deleteOne(id));
-    }
-
-    // [A09] Existing hard-purge — moved out of AdminController.
-    @PostMapping("/clear")
-    public ResponseEntity<Map<String, Object>> clear() {
-        int deleted = adminAuditService.clearAll();
-        return ResponseEntity.ok(Map.of(
-                "message", "All audit logs deleted",
-                "deletedCount", deleted
-        ));
-    }
+    // The audit trail is append-only: individual-delete and bulk-clear
+    // endpoints have been removed so the log cannot be tampered with or wiped.
 
     // [A03] Export — JSON / CSV / XML. The XML branch builds the document by
     //        string concatenation with no escaping; if any audit row's

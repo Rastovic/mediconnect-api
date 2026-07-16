@@ -147,10 +147,16 @@ public class DoctorNoteService {
     //        Doctor Note detail page DOM.
     public ClinicalNoteDto importXml(MultipartFile file, Long patientId) {
         try {
-            // [A03] No XML feature flags set — disallow-doctype-decl, external
-            //        general entities, external parameter entities and
-            //        load-external-dtd are all at their permissive defaults.
+            // Harden the parser against XXE: forbid DOCTYPE entirely, and
+            // disable external general/parameter entities and external DTD
+            // loading as defence in depth.
             DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+            dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            dbf.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            dbf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+            dbf.setXIncludeAware(false);
+            dbf.setExpandEntityReferences(false);
             DocumentBuilder db = dbf.newDocumentBuilder();
             Document doc = db.parse(new InputSource(new ByteArrayInputStream(file.getBytes())));
 
@@ -176,10 +182,8 @@ public class DoctorNoteService {
                     .build();
             return toDto(noteRepository.save(note));
         } catch (Exception e) {
-            // [A10] Parser exception bubbled out verbatim with type + message,
-            //        so XXE failures (and the entity-resolution behaviour) are
-            //        easy to observe from the response body.
-            throw new RuntimeException("XML import failed: " + e.getClass().getSimpleName() + " " + e.getMessage(), e);
+            // Generic message to the caller; details stay server-side.
+            throw new RuntimeException("XML import failed");
         }
     }
 

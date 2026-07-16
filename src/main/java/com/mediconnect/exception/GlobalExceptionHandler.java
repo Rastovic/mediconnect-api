@@ -74,6 +74,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
+    // Unsupported HTTP method on an existing path (e.g. a removed verb) → 405,
+    // not a generic 500.
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Map<String, Object>> handleMethodNotSupported(
+            org.springframework.web.HttpRequestMethodNotSupportedException ex) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "Method not allowed");
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(body);
+    }
+
     @ExceptionHandler(Throwable.class)
     public ResponseEntity<Map<String, Object>> handleThrowable(Throwable ex) {
         log.error("Internal error", ex);

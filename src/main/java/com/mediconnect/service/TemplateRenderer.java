@@ -1,5 +1,6 @@
 package com.mediconnect.service;
 
+import freemarker.core.TemplateClassResolver;
 import freemarker.template.Configuration;
 import freemarker.template.TemplateExceptionHandler;
 import jakarta.annotation.PostConstruct;
@@ -12,21 +13,24 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
-// [A03] Software Supply Chain Failures — caller-controlled template + caller-
-//        controlled model. Two paths into Freemarker:
+// Server-side note rendering. Templates are engine-driven, so the two ways a
+// caller reaches Freemarker are both locked down:
 //
-//        1. `renderByName(name, data)`: name is concatenated into a filesystem
-//           path under {workdir}/notes/templates/. No normalisation — passing
-//           "../../etc/passwd" reads outside the directory.
-//        2. `renderInline(source, data)`: caller's raw string runs through the
-//           template engine. SSTI payloads (`<#assign x = "freemarker.template.utility.Execute"?new()>${x("id")}`)
-//           execute commands as the JVM user.
+//   1. renderByName(name, data): `name` must be one of the known, server-owned
+//      templates (ALLOWED_TEMPLATES) — no caller-chosen paths, so template
+//      path-traversal is not possible.
+//   2. renderInline(source, data): caller input is NEVER executed as a
+//      template; it is returned as escaped text, so SSTI is not possible.
 //
-//        Both paths share a single Configuration with the new_built_ins_enabled
-//        set true so the Execute built-in works without further config.
+// The Configuration additionally forbids the ?new built-in from resolving any
+// class (ALLOWS_NOTHING_RESOLVER) and disables the ?api built-in, so even a
+// server-owned template cannot be coerced into instantiating arbitrary types.
 @Component
 public class TemplateRenderer {
+
+    private static final Set<String> ALLOWED_TEMPLATES = Set.of("soap", "progress", "triage");
 
     private Configuration cfg;
     private Path baseDir;
@@ -56,11 +60,11 @@ public class TemplateRenderer {
         cfg = new Configuration(Configuration.VERSION_2_3_34);
         cfg.setDirectoryForTemplateLoading(baseDir.toFile());
         cfg.setDefaultEncoding("UTF-8");
-        // [A03] DEBUG_HANDLER rethrows the original exception so SSTI failures
-        //        bubble back to the HTTP response with full stack traces.
-        cfg.setTemplateExceptionHandler(TemplateExceptionHandler.DEBUG_HANDLER);
-        // [A03] new_built_ins_enabled defaults true — keep it that way so
-        //        `freemarker.template.utility.Execute?new()` is reachable.
+        cfg.setTemplateExceptionHandler(TemplateExceptionHandler.RETHROW_HANDLER);
+        // Refuse to resolve any class via ?new, and disable the ?api built-in,
+        // so a template cannot instantiate arbitrary types (e.g. Execute).
+        cfg.setNewBuiltinClassResolver(TemplateClassResolver.ALLOWS_NOTHING_RESOLVER);
+        cfg.setAPIBuiltinEnabled(false);
     }
 
     private void writeIfMissing(String name, String contents) throws IOException {
@@ -70,13 +74,13 @@ public class TemplateRenderer {
         }
     }
 
-    // [A03] Path is caller-controlled. Freemarker is given a name, then
-    //        builds the full filesystem path against the configured directory.
-    //        Freemarker normalises the path, but caller can still escape
-    //        the templates directory by passing a relative path that
-    //        resolves outside, and can pull in arbitrary `.ftl` files
-    //        already on disk (e.g. via the multipart import endpoint).
+    // Only the known, server-owned templates may be rendered. A caller-supplied
+    // name that is not in the allow-list is rejected, so no filesystem path is
+    // ever built from caller input (no template path-traversal).
     public String renderByName(String name, Map<String, Object> data) {
+        if (name == null || !ALLOWED_TEMPLATES.contains(name)) {
+            return "<pre class=\"render-error\">Unknown template</pre>";
+        }
         try {
             Map<String, Object> model = wrap(data);
             freemarker.template.Template tpl = cfg.getTemplate(name + ".ftl");
@@ -84,27 +88,24 @@ public class TemplateRenderer {
             tpl.process(model, out);
             return out.toString();
         } catch (Exception e) {
-            // [A10] Raw exception message returned so SSTI / path-traversal
-            //        failures surface with full diagnostic detail to the caller.
-            return "<pre class=\"render-error\">" + e.getClass().getSimpleName() + ": " + e.getMessage() + "</pre>";
+            // Generic message only — no engine/stack detail leaked to the caller.
+            return "<pre class=\"render-error\">Could not render note</pre>";
         }
     }
 
-    // [A03] Inline rendering — caller's literal Freemarker source executed.
-    //        Trivial SSTI demo:
-    //          {"templateBody":"<#assign x = \"freemarker.template.utility.Execute\"?new()>${x(\"id\")}"}
+    // Caller input is treated as literal text, not a template: the string is
+    // HTML-escaped and returned. No Freemarker evaluation, so no SSTI.
     public String renderInline(String source, Map<String, Object> data) {
-        try {
-            Map<String, Object> model = wrap(data);
-            freemarker.template.Template tpl = new freemarker.template.Template(
-                    "inline-" + Integer.toHexString(System.identityHashCode(source)),
-                    new java.io.StringReader(source), cfg);
-            StringWriter out = new StringWriter();
-            tpl.process(model, out);
-            return out.toString();
-        } catch (Exception e) {
-            return "<pre class=\"render-error\">" + e.getClass().getSimpleName() + ": " + e.getMessage() + "</pre>";
-        }
+        if (source == null) return "";
+        return "<p>" + escapeHtml(source) + "</p>";
+    }
+
+    private static String escapeHtml(String s) {
+        return s.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private Map<String, Object> wrap(Map<String, Object> data) {
