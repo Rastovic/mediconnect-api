@@ -23,17 +23,16 @@ public class MedicalRecordController {
 
     private final MedicalRecordService medicalRecordService;
 
-    // [A01] No access control — any caller receives all medical records
+    // Principal-scoped in the service: a PATIENT receives only their own records,
+    // staff receive all.
     @GetMapping
     public ResponseEntity<List<MedicalRecordDto>> getAllRecords() {
         return ResponseEntity.ok(medicalRecordService.findAll());
     }
 
-    // [A01] Any authenticated DOCTOR (or unauthenticated caller, given permitAll)
-    //        can create a medical record for ANY patient.
-    //        No verification that the doctor has ever treated this patient,
-    //        no shared appointment check, no care-plan membership check.
+    // Only clinicians (doctors) and admins may author a medical record.
     @PostMapping
+    @PreAuthorize("hasAnyRole('DOCTOR','ADMIN')")
     public ResponseEntity<MedicalRecordDto> createRecord(@RequestBody MedicalRecordDto dto) {
         return ResponseEntity.status(201).body(medicalRecordService.create(dto));
     }
@@ -45,14 +44,14 @@ public class MedicalRecordController {
     }
 
     @GetMapping("/patient/{patientId}")
+    @PreAuthorize("@authz.canViewPatientRecords(authentication,#patientId)")
     public ResponseEntity<List<MedicalRecordDto>> getByPatient(@PathVariable Long patientId) {
-        // [A01] No check that the caller is the patient or their treating doctor
         return ResponseEntity.ok(medicalRecordService.findByPatientId(patientId));
     }
 
-    // [A01] No ownership check — any authenticated user can update any medical record.
-    //        No verification that the caller is the treating doctor or patient.
+    // Only the treating doctor on the record (or an admin) may edit it.
     @PutMapping("/{id}")
+    @PreAuthorize("@authz.canEditMedicalRecord(authentication,#id)")
     public ResponseEntity<MedicalRecordDto> updateRecord(
             @PathVariable Long id,
             @RequestBody MedicalRecordDto dto) {

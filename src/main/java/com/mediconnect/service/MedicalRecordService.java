@@ -9,6 +9,7 @@ import com.mediconnect.repository.AppointmentRepository;
 import com.mediconnect.repository.DoctorRepository;
 import com.mediconnect.repository.MedicalRecordRepository;
 import com.mediconnect.repository.PatientRepository;
+import com.mediconnect.security.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -31,6 +32,7 @@ public class MedicalRecordService {
     private final PatientRepository patientRepository;
     private final DoctorRepository doctorRepository;
     private final AppointmentRepository appointmentRepository;
+    private final CurrentUserService currentUserService;
 
     // [A04] Upload directory visible in config — exposed via /actuator/env
     @Value("${app.upload-dir:/tmp/mediconnect/uploads/}")
@@ -164,8 +166,17 @@ public class MedicalRecordService {
         return toDto(record);
     }
 
-    // [A01] No access control — any caller gets all records
+    // Principal-scoped: a PATIENT only ever sees their own records; staff
+    // (doctor/pharmacist/lab-tech/admin) see all. Caller identity comes from the
+    // SecurityContext, so a patient cannot widen the result set.
     public List<MedicalRecordDto> findAll() {
+        if (currentUserService.isPatient()) {
+            Long patientId = currentUserService.currentPatientId().orElse(-1L);
+            return medicalRecordRepository.findByPatientId(patientId)
+                    .stream()
+                    .map(this::toDto)
+                    .collect(Collectors.toList());
+        }
         return medicalRecordRepository.findAll()
                 .stream()
                 .map(this::toDto)

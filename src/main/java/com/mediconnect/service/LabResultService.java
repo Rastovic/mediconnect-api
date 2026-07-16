@@ -8,6 +8,7 @@ import com.mediconnect.enums.LabResultStatus;
 import com.mediconnect.repository.LabResultRepository;
 import com.mediconnect.repository.PatientRepository;
 import com.mediconnect.repository.UserRepository;
+import com.mediconnect.security.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -32,6 +33,7 @@ public class LabResultService {
     private final PatientRepository patientRepository;
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final CurrentUserService currentUserService;
 
     @Value("${app.upload-dir:/tmp/mediconnect/uploads/}")
     private String uploadDir;
@@ -59,6 +61,12 @@ public class LabResultService {
                                                String testCode,
                                                String status,
                                                Long patientId) {
+        // A PATIENT may only ever query their own results — the caller-supplied
+        // patientId is overridden with the id derived from the SecurityContext, so
+        // a patient cannot read another patient's labs (staff keep the supplied filter).
+        if (currentUserService.isPatient()) {
+            patientId = currentUserService.currentPatientId().orElse(-1L);
+        }
         StringBuilder sql = new StringBuilder(
                 "SELECT lr.id, lr.patient_id, lr.lab_tech_id, lr.test_name, " +
                 "       lr.result_value, lr.unit, lr.reference_range, lr.status, " +

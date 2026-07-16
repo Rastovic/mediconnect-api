@@ -4,6 +4,7 @@ import com.mediconnect.repository.AppointmentRepository;
 import com.mediconnect.repository.LabResultRepository;
 import com.mediconnect.repository.MedicalRecordRepository;
 import com.mediconnect.repository.MessageRepository;
+import com.mediconnect.repository.PatientRepository;
 import com.mediconnect.repository.PrescriptionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -23,6 +24,7 @@ public class AuthzService {
     private final MessageRepository messages;
     private final PrescriptionRepository prescriptions;
     private final LabResultRepository labs;
+    private final PatientRepository patients;
 
     public boolean isSelf(Authentication auth, Long userId) {
         Long uid = userIdOf(auth);
@@ -31,6 +33,33 @@ public class AuthzService {
 
     public boolean isAdmin(Authentication auth) { return hasRole(auth, "ADMIN"); }
     public boolean isDoctor(Authentication auth) { return hasRole(auth, "DOCTOR"); }
+
+    /** Non-patient staff who legitimately see cross-patient clinical data in this app's model. */
+    public boolean isStaff(Authentication auth) {
+        return hasRole(auth, "ADMIN") || hasRole(auth, "DOCTOR")
+                || hasRole(auth, "LAB_TECH") || hasRole(auth, "PHARMACIST");
+    }
+
+    /**
+     * A patient may list the records of their own patient id only; any staff role
+     * may list any patient's records. {@code patientId} is the Patient entity id.
+     */
+    public boolean canViewPatientRecords(Authentication auth, Long patientId) {
+        if (isStaff(auth)) return true;
+        Long uid = userIdOf(auth);
+        return patients.findById(patientId).map(p ->
+                idEq(p.getUser() != null ? p.getUser().getId() : null, uid)
+        ).orElse(false);
+    }
+
+    /** Only the treating doctor on the record or an admin may edit a medical record. */
+    public boolean canEditMedicalRecord(Authentication auth, Long recordId) {
+        if (isAdmin(auth)) return true;
+        Long uid = userIdOf(auth);
+        return records.findById(recordId).map(r ->
+                idEq(r.getDoctor() != null && r.getDoctor().getUser() != null ? r.getDoctor().getUser().getId() : null, uid)
+        ).orElse(false);
+    }
 
     public boolean canViewAppointment(Authentication auth, Long apptId) {
         if (isAdmin(auth)) return true;

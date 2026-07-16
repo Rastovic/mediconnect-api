@@ -13,14 +13,16 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.password.NoOpPasswordEncoder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -31,6 +33,11 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final CustomUserDetailsService userDetailsService;
+
+    // Explicit allow-list of trusted browser origins (comma-separated). Defaults to the
+    // local frontend dev servers; override in prod via APP_CORS_ALLOWED_ORIGINS.
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
+    private String allowedOrigins;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -48,7 +55,7 @@ public class SecurityConfig {
                 .contentSecurityPolicy(csp -> csp.policyDirectives("default-src 'self'; frame-ancestors 'none'"))
             )
 
-            // [A05] CORS with wildcard configuration applied globally
+            // CORS restricted to an explicit origin allow-list (see corsConfigurationSource).
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
 
             .sessionManagement(session ->
@@ -70,30 +77,36 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // [A05] Wildcard CORS policy — any origin, method and header is accepted.
-    //        Allows cross-origin requests from attacker-controlled domains.
-    //        Combined with CSRF disabled, enables full cross-site request execution.
+    // CORS locked to a configured origin allow-list. No wildcard: only the trusted
+    // frontend origins may make cross-origin calls, and only the methods/headers the
+    // API actually uses are permitted. Credentials are allowed so the cookie-auth
+    // path works, which is only valid because the origin list is explicit (never "*").
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
+        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+
         CorsConfiguration config = new CorsConfiguration();
-        // [A05] Any domain can make cross-origin requests to this API
-        config.setAllowedOrigins(List.of("*"));
-        // [A05] All HTTP methods allowed — including DELETE and PATCH
-        config.setAllowedMethods(List.of("*"));
-        // [A05] All headers allowed — including Authorization, Cookie, X-Custom-*
-        config.setAllowedHeaders(List.of("*"));
+        config.setAllowedOrigins(origins);
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
+        config.setExposedHeaders(List.of("Content-Disposition"));
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
         return source;
     }
 
-    // [A04] NoOpPasswordEncoder used — passwords compared as plain text
-    //        by the DaoAuthenticationProvider internal path.
-    //        Actual hashing is done manually via PasswordUtils.hashPassword() (MD5),
-    //        so what is stored is an MD5 hex string compared as-is.
+    // BCrypt (cost 12) for the DaoAuthenticationProvider path. Password verification
+    // in the login flow itself runs through PasswordUtils (BCrypt + legacy-MD5 shim);
+    // this bean ensures the provider never falls back to plaintext comparison.
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return NoOpPasswordEncoder.getInstance();
+        return new BCryptPasswordEncoder(12);
     }
 
     @Bean

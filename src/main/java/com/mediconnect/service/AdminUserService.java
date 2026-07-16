@@ -10,6 +10,7 @@ import com.mediconnect.entity.User;
 import com.mediconnect.enums.Role;
 import com.mediconnect.repository.AuditLogRepository;
 import com.mediconnect.repository.UserRepository;
+import com.mediconnect.security.CurrentUserService;
 import com.mediconnect.security.JwtUtil;
 import com.mediconnect.security.PasswordUtils;
 import com.mediconnect.security.UserPrincipal;
@@ -31,6 +32,7 @@ public class AdminUserService {
     private final AuditLogRepository auditLogRepository;
     private final PasswordUtils passwordUtils;
     private final JwtUtil jwtUtil;
+    private final CurrentUserService currentUserService;
 
     // [A01] No role check — any caller can retrieve the full user list.
     // [A03] Optional filters concatenated with no parameterisation when role is
@@ -174,9 +176,23 @@ public class AdminUserService {
     //              impersonation itself. The returned token is indistinguishable
     //              from a normal login token. JwtUtil.generateToken does not
     //              embed an "impersonated_by" claim — the trail is broken.
-    public ImpersonationResponseDto impersonate(Long id) {
+    public ImpersonationResponseDto impersonate(Long id, String reason) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found: " + id));
+
+        // High-risk operation — record it in the append-only audit trail before the
+        // token is minted, capturing the acting admin, the target, and the reason.
+        User actingAdmin = currentUserService.currentUser().orElse(null);
+        String justification = (reason == null || reason.isBlank()) ? "(no reason provided)" : reason.trim();
+        auditLogRepository.save(AuditLog.builder()
+                .user(actingAdmin)
+                .action("ADMIN_IMPERSONATION")
+                .entityType("User")
+                .entityId(user.getId())
+                .details("Impersonated user " + user.getUsername() + " - reason: " + justification)
+                .createdAt(LocalDateTime.now())
+                .build());
+
         UserPrincipal principal = new UserPrincipal(user);
         String token = jwtUtil.generateToken(principal);
         return ImpersonationResponseDto.builder()

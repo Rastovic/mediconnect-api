@@ -57,8 +57,8 @@ public class LabResultController {
     }
 
     @GetMapping("/patient/{patientId}")
+    @PreAuthorize("@authz.canViewPatientRecords(authentication,#patientId)")
     public ResponseEntity<List<LabResultDto>> getByPatient(@PathVariable Long patientId) {
-        // [A01] Nema provere da je pozivalac taj pacijent ili njegov doktor
         return ResponseEntity.ok(labResultService.findByPatientId(patientId));
     }
 

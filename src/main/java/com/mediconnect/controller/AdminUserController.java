@@ -97,11 +97,15 @@ public class AdminUserController {
         return ResponseEntity.ok(adminUserService.resetPassword(id, supplied));
     }
 
-    // [A01][A07] Mints a JWT for the target user. No MFA, no audit entry
-    //              for the impersonation itself.
+    // Impersonation is a high-risk operation: it is recorded in the append-only audit
+    // log (acting admin, target user, and the supplied justification). The reason is
+    // optional on the wire but the event is always audited.
     @PostMapping("/{id}/impersonate")
-    public ResponseEntity<ImpersonationResponseDto> impersonate(@PathVariable Long id) {
-        return ResponseEntity.ok(adminUserService.impersonate(id));
+    public ResponseEntity<ImpersonationResponseDto> impersonate(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body) {
+        String reason = (body != null) ? body.get("reason") : null;
+        return ResponseEntity.ok(adminUserService.impersonate(id, reason));
     }
 
     // [A04][A09] Unbounded batch delete. No upper limit, no per-id audit entry.

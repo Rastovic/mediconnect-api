@@ -12,6 +12,7 @@ import com.mediconnect.repository.MedicalRecordRepository;
 import com.mediconnect.repository.PatientRepository;
 import com.mediconnect.repository.PrescriptionRepository;
 import com.mediconnect.repository.UserRepository;
+import com.mediconnect.security.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +29,7 @@ public class PrescriptionService {
     private final PatientRepository patientRepository;
     private final DoctorRepository doctorRepository;
     private final UserRepository userRepository;
+    private final CurrentUserService currentUserService;
 
     // [A02] Missing state machine — a prescription can be dispensed regardless
     //        of its current status. No guard against double dispensing or dispensing
@@ -47,21 +49,36 @@ public class PrescriptionService {
     //    if (prescription.getStatus() != PrescriptionStatus.CREATED) {
     //        throw new IllegalStateException("Only CREATED prescriptions can be dispensed");
     //    }
+    // State machine enforced: only a CREATED prescription may be dispensed, exactly once.
+    // The dispensing pharmacist is taken from the authenticated principal, never from the
+    // request body, so the action cannot be attributed to an arbitrary user. Role is
+    // gated at the controller (PHARMACIST/ADMIN).
     public PrescriptionDto dispense(Long id, Long pharmacistId) {
         Prescription prescription = prescriptionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Prescription not found: " + id));
 
-        // [A02] Missing: status guard before dispensing
-        // [A02] No check that the caller actually holds the PHARMACIST role
-        User pharmacist = userRepository.findById(pharmacistId)
-                .orElseThrow(() -> new RuntimeException("Pharmacist not found: " + pharmacistId));
+        if (prescription.getStatus() != PrescriptionStatus.CREATED) {
+            throw new IllegalStateException("Only CREATED prescriptions can be dispensed");
+        }
 
-        // [A02] Overwrites dispensedAt even if already DISPENSED
+        User pharmacist = currentUserService.requireUser();
+
         prescription.setStatus(PrescriptionStatus.DISPENSED);
         prescription.setPharmacist(pharmacist);
         prescription.setDispensedAt(LocalDateTime.now());
 
         return toDto(prescriptionRepository.save(prescription));
+    }
+
+    // Only the transitions allowed by the business state machine are accepted.
+    private static void assertAllowedTransition(PrescriptionStatus from, PrescriptionStatus to) {
+        boolean allowed = switch (from) {
+            case CREATED -> to == PrescriptionStatus.DISPENSED || to == PrescriptionStatus.CANCELLED;
+            case DISPENSED, CANCELLED -> false; // terminal states
+        };
+        if (!allowed) {
+            throw new IllegalStateException("Illegal prescription transition: " + from + " -> " + to);
+        }
     }
 
     // [A02] No state machine validation — any status transition is accepted and
@@ -78,15 +95,19 @@ public class PrescriptionService {
         Prescription prescription = prescriptionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Prescription not found: " + id));
 
-        // [A02] PrescriptionStatus.valueOf() accepts any valid enum string
-        //        without validating the current state or the allowed transition graph
-        prescription.setStatus(PrescriptionStatus.valueOf(status));
+        PrescriptionStatus target;
+        try {
+            target = PrescriptionStatus.valueOf(status);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new IllegalArgumentException("Unknown prescription status: " + status);
+        }
 
-        if (PrescriptionStatus.valueOf(status) == PrescriptionStatus.DISPENSED
-                && prescription.getDispensedAt() == null) {
-            // [A02] dispensedAt is only set if not already present —
-            //        but the status change happens unconditionally regardless
+        assertAllowedTransition(prescription.getStatus(), target);
+        prescription.setStatus(target);
+
+        if (target == PrescriptionStatus.DISPENSED && prescription.getDispensedAt() == null) {
             prescription.setDispensedAt(LocalDateTime.now());
+            prescription.setPharmacist(currentUserService.requireUser());
         }
 
         return toDto(prescriptionRepository.save(prescription));
@@ -126,8 +147,15 @@ public class PrescriptionService {
                 .stream().map(this::toDto).collect(Collectors.toList());
     }
 
-    // [A01] No access control — returns every prescription in the system
+    // Principal-scoped: a PATIENT only ever sees their own prescriptions; staff
+    // (doctor/pharmacist/lab-tech/admin) see the full list. The caller identity comes
+    // from the SecurityContext, so a patient cannot widen the result set.
     public List<PrescriptionDto> findAll() {
+        if (currentUserService.isPatient()) {
+            Long patientId = currentUserService.currentPatientId().orElse(-1L);
+            return prescriptionRepository.findByPatientId(patientId)
+                    .stream().map(this::toDto).collect(Collectors.toList());
+        }
         return prescriptionRepository.findAll()
                 .stream().map(this::toDto).collect(Collectors.toList());
     }

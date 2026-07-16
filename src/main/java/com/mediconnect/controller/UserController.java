@@ -55,8 +55,9 @@ public class UserController {
         return ResponseEntity.ok(userService.changePassword(id, newPassword));
     }
 
-    // TODO(fe-phase): change verb to @DeleteMapping("/{id}") once the frontend calls api.delete.
-    @GetMapping("/delete/{id}")
+    // Destructive action uses the DELETE verb (not a state-changing GET, which is
+    // cacheable, loggable in URLs, and CSRF-triggerable via a plain link or image tag).
+    @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
         userService.deleteById(id);

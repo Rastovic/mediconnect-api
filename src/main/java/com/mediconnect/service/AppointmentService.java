@@ -10,6 +10,7 @@ import com.mediconnect.repository.AppointmentRepository;
 import com.mediconnect.repository.DoctorRepository;
 import com.mediconnect.repository.PatientRepository;
 import com.mediconnect.repository.UserRepository;
+import com.mediconnect.security.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -29,15 +30,18 @@ public class AppointmentService {
     private final DoctorRepository doctorRepository;
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final CurrentUserService currentUserService;
 
-    // [A05] SQL Injection — doctorName concatenated directly into the query string.
-    //        No parameterization, no escaping, no whitelist validation.
-    //        Attack: doctorName = "' OR '1'='1" → returns all appointments.
-    //        Attack: doctorName = "'; DROP TABLE appointments; --" → table destruction.
-    //        Attack: doctorName = "' UNION SELECT username,password_hash,3,4,5,6,7 FROM users --"
-    //                → dumps the users table through the appointment response.
+    // Principal-scoped list. A PATIENT sees only their own appointments; staff
+    // (doctor/pharmacist/lab-tech/admin) get the doctorName-filtered search. The
+    // caller identity is read from the SecurityContext, and doctorName is bound as
+    // a parameter (no string concatenation), so there is no IDOR and no SQL injection.
     public List<AppointmentDto> searchAppointments(String doctorName) {
-        // [A05] SQL Injection — doctorName concatenated directly into the query string.
+        if (currentUserService.isPatient()) {
+            Long patientId = currentUserService.currentPatientId().orElse(-1L);
+            return appointmentRepository.findByPatientId(patientId)
+                    .stream().map(this::toDto).collect(Collectors.toList());
+        }
         String sql = "SELECT a.id, a.patient_id, a.doctor_id, a.status, " +
                      "       a.requested_date, a.notes, a.created_at, " +
                      "       CONCAT(up.first_name, ' ', up.last_name) AS patient_name, " +
