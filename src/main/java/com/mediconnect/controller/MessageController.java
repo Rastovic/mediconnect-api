@@ -22,7 +22,7 @@ public class MessageController {
 
     // [A01] userId query param not verified against JWT — any user can fetch any other user's conversations
     @GetMapping("/conversations")
-    @PreAuthorize("@authz.isSelf(authentication,#userId) or @authz.isAdmin(authentication)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<ConversationDto>> getConversations(@RequestParam Long userId) {
         return ResponseEntity.ok(messageService.getConversations(userId));
     }
@@ -53,7 +53,7 @@ public class MessageController {
     //          GET /api/messages/conversation/3?viewerId=1  → reads user 1 ↔ user 3 conversation
     //          (iterate userId to harvest all private medical conversations)
     @GetMapping("/conversation/{userId}")
-    @PreAuthorize("@authz.isSelf(authentication,#viewerId) or @authz.isAdmin(authentication)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<MessageDto>> getConversation(
             @PathVariable Long userId,
             @RequestParam Long viewerId) {
@@ -66,20 +66,20 @@ public class MessageController {
     //
     //        Attack: DELETE /api/messages/42  → deletes message 42 regardless of sender.
     @DeleteMapping("/{id}")
-    @PreAuthorize("@authz.canViewMessage(authentication,#id)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Void> deleteMessage(@PathVariable Long id) {
         messageService.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/inbox/{userId}")
-    @PreAuthorize("@authz.isSelf(authentication,#userId) or @authz.isAdmin(authentication)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<MessageDto>> getInbox(@PathVariable Long userId) {
         return ResponseEntity.ok(messageService.getInbox(userId));
     }
 
     @PatchMapping("/{id}/read")
-    @PreAuthorize("@authz.canViewMessage(authentication,#id)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<MessageDto> markAsRead(@PathVariable Long id) {
         return ResponseEntity.ok(messageService.markAsRead(id));
     }

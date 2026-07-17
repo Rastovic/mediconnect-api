@@ -38,20 +38,20 @@ public class MedicalRecordController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("@authz.canViewMedicalRecord(authentication,#id)")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR','ADMIN')")
     public ResponseEntity<MedicalRecordDto> getRecord(@PathVariable Long id) {
         return ResponseEntity.ok(medicalRecordService.findById(id));
     }
 
     @GetMapping("/patient/{patientId}")
-    @PreAuthorize("@authz.canViewPatientRecords(authentication,#patientId)")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR','LAB_TECH','PHARMACIST','ADMIN')")
     public ResponseEntity<List<MedicalRecordDto>> getByPatient(@PathVariable Long patientId) {
         return ResponseEntity.ok(medicalRecordService.findByPatientId(patientId));
     }
 
     // Only the treating doctor on the record (or an admin) may edit it.
     @PutMapping("/{id}")
-    @PreAuthorize("@authz.canEditMedicalRecord(authentication,#id)")
+    @PreAuthorize("hasAnyRole('DOCTOR','ADMIN')")
     public ResponseEntity<MedicalRecordDto> updateRecord(
             @PathVariable Long id,
             @RequestBody MedicalRecordDto dto) {
@@ -90,7 +90,7 @@ public class MedicalRecordController {
     // [A08] No hash verification — the file returned could have been silently modified;
     //        client cannot check integrity against a stored content_hash.
     @GetMapping("/{id}/attachment")
-    @PreAuthorize("@authz.canViewMedicalRecord(authentication,#id)")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR','ADMIN')")
     public ResponseEntity<byte[]> downloadAttachment(@PathVariable Long id) throws IOException {
         byte[] content = medicalRecordService.downloadAttachment(id);
         return ResponseEntity.ok()

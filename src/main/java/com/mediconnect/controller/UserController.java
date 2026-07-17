@@ -24,13 +24,13 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("@authz.isSelf(authentication,#id) or @authz.isAdmin(authentication)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<UserDto> getUserById(@PathVariable Long id) {
         return ResponseEntity.ok(userService.findById(id));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("@authz.isSelf(authentication,#id) or @authz.isAdmin(authentication)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<UserDto> updateUser(
             @PathVariable Long id,
             @RequestBody UserDto dto) {
@@ -47,7 +47,7 @@ public class UserController {
     }
 
     @PutMapping("/{id}/password")
-    @PreAuthorize("@authz.isSelf(authentication,#id) or @authz.isAdmin(authentication)")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<UserDto> changePassword(
             @PathVariable Long id,
             @RequestBody Map<String, String> body) {

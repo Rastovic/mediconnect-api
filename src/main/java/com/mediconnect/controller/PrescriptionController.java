@@ -32,14 +32,14 @@ public class PrescriptionController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("@authz.canViewPrescription(authentication,#id)")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR','PHARMACIST','ADMIN')")
     public ResponseEntity<PrescriptionDto> getById(@PathVariable Long id) {
         // [A01] No check that the caller is the patient or prescribing doctor
         return ResponseEntity.ok(prescriptionService.findById(id));
     }
 
     @GetMapping("/patient/{patientId}")
-    @PreAuthorize("@authz.canViewPatientRecords(authentication,#patientId)")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR','LAB_TECH','PHARMACIST','ADMIN')")
     public ResponseEntity<List<PrescriptionDto>> getByPatient(@PathVariable Long patientId) {
         return ResponseEntity.ok(prescriptionService.findByPatientId(patientId));
     }

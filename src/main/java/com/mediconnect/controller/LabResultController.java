@@ -51,13 +51,13 @@ public class LabResultController {
     //        čiji je rezultat, ili doktor koji ga je naručio.
     //        Bilo koji korisnik može iteracijom ID-a pristupiti tuđim nalazima.
     @GetMapping("/{id}")
-    @PreAuthorize("@authz.canViewLabResult(authentication,#id)")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR','LAB_TECH','ADMIN')")
     public ResponseEntity<LabResultDto> getById(@PathVariable Long id) {
         return ResponseEntity.ok(labResultService.findById(id));
     }
 
     @GetMapping("/patient/{patientId}")
-    @PreAuthorize("@authz.canViewPatientRecords(authentication,#patientId)")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR','LAB_TECH','PHARMACIST','ADMIN')")
     public ResponseEntity<List<LabResultDto>> getByPatient(@PathVariable Long patientId) {
         return ResponseEntity.ok(labResultService.findByPatientId(patientId));
     }
@@ -95,7 +95,7 @@ public class LabResultController {
     //  Nema: toAbsolutePath().normalize().startsWith(uploadDir) provere.
     //  Nema: poređenja filePath sa lr.attachmentPath iz baze.
     @GetMapping("/{id}/file")
-    @PreAuthorize("@authz.canViewLabResult(authentication,#id)")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR','LAB_TECH','ADMIN')")
     public ResponseEntity<byte[]> downloadFile(@PathVariable Long id) throws IOException {
         byte[] content = labResultService.downloadFile(id);
         return ResponseEntity.ok()

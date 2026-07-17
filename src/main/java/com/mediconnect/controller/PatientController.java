@@ -15,7 +15,7 @@ public class PatientController {
     private final PatientService patientService;
 
     @GetMapping("/by-user/{userId}")
-    @PreAuthorize("@authz.canViewPatientChart(authentication,#userId)")
+    @PreAuthorize("hasAnyRole('PATIENT','DOCTOR','ADMIN')")
     public ResponseEntity<PatientDto> getByUserId(@PathVariable Long userId) {
         return patientService.findByUserId(userId)
                 .map(ResponseEntity::ok)
