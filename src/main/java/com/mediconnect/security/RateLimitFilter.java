@@ -30,7 +30,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
             throws ServletException, IOException {
         String uri = req.getRequestURI();
-        if (!uri.startsWith("/api/auth/login") && !uri.startsWith("/api/auth/register")) {
+        // Auth endpoints (brute-force) + the LLM chatbot (prompt-injection probing
+        // is high-volume, and each call is an outbound model inference).
+        if (!uri.startsWith("/api/auth/login") && !uri.startsWith("/api/auth/register")
+                && !uri.startsWith("/api/ai/")) {
             chain.doFilter(req, res);
             return;
         }

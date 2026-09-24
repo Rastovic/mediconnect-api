@@ -51,6 +51,12 @@ management:
 # Application secrets — all injected from the environment, no fallbacks.
 # JWT_SECRET: base64 of >= 32 random bytes (openssl rand -base64 48)
 app:
+  # MediAsistent LLM chatbot (fixed build). Local Ollama runner — free, offline.
+  # No secret is placed in the system prompt (see AiAssistantService), so there
+  # is no support-token to leak.
+  ai:
+    ollama-url: ${OLLAMA_URL:http://localhost:11434}
+    model: ${AI_MODEL:qwen2.5:3b-instruct}
   jwt:
     secret: ${JWT_SECRET}
   prescription:
