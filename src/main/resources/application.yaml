@@ -78,3 +78,12 @@ logging:
     org.hibernate.SQL: DEBUG
     org.hibernate.type.descriptor.sql.BasicBinder: TRACE
     org.springframework.security: DEBUG
+
+# MediAsistent LLM chatbot (OWASP LLM01 demo).
+# Points at a local Ollama runner — free, offline, no API key.
+app:
+  ai:
+    ollama-url: ${OLLAMA_URL:http://localhost:11434}
+    model: ${AI_MODEL:qwen2.5:3b-instruct}
+    # [A04] Secret embedded in the system prompt (vulnerable build).
+    support-token: ${CTF_LLM_TOKEN:INTERNAL-SUPPORT-TOKEN-9f3a1c}
