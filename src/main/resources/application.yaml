@@ -85,3 +85,13 @@ logging:
 mediconnect:
   internal:
     metadata-token: flag{a02_config_secrets_dump_caf015}
+
+# MediAsistent LLM chatbot (OWASP LLM01 demo). Local Ollama runner — free, offline.
+# [CTF a05-llm-system-prompt-leak] The support-token IS the flag: it sits in the
+#   system prompt (AiAssistantService) and leaks via the debugPrompt response
+#   field or by talking the model into repeating it.
+app:
+  ai:
+    ollama-url: ${OLLAMA_URL:http://localhost:11434}
+    model: ${AI_MODEL:qwen2.5:3b-instruct}
+    support-token: ${CTF_LLM_TOKEN:flag{a05_llm_system_prompt_leak_38264a}}

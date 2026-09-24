@@ -27,5 +27,18 @@ services:
     ports:
       - "8082:80"
 
+  # Local LLM runner for the MediAsistent chatbot (OWASP LLM01 CTF challenges).
+  # MIT-licensed, fully offline.
+  #   docker exec -it mediconnect-ollama ollama pull qwen2.5:3b-instruct
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mediconnect-ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
 volumes:
   mysql_data:
+  ollama_data:
