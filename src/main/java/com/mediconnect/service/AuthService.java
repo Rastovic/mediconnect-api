@@ -5,6 +5,10 @@ import com.mediconnect.dto.RegisterRequest;
 import com.mediconnect.entity.User;
 import com.mediconnect.enums.Role;
 import com.mediconnect.repository.UserRepository;
+import com.mediconnect.entity.Patient;
+import com.mediconnect.entity.Doctor;
+import com.mediconnect.repository.PatientRepository;
+import com.mediconnect.repository.DoctorRepository;
 import com.mediconnect.security.JwtUtil;
 import com.mediconnect.security.PasswordUtils;
 import com.mediconnect.security.UserPrincipal;
@@ -20,6 +24,8 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordUtils passwordUtils;
     private final JwtUtil jwtUtil;
+    private final PatientRepository patientRepository;
+    private final DoctorRepository doctorRepository;
 
     // [A07] Mass Assignment: role taken directly from request body
     //        without any server-side validation or whitelist check.
@@ -55,7 +61,20 @@ public class AuthService {
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        // Create the matching domain profile so a freshly registered user has a
+        // working profile page (parity with the seed accounts).
+        if (saved.getRole() == Role.PATIENT) {
+            patientRepository.save(Patient.builder().user(saved).build());
+        } else if (saved.getRole() == Role.DOCTOR) {
+            doctorRepository.save(Doctor.builder().user(saved)
+                    .specialty("General Practitioner")
+                    .licenseNumber("LIC-NEW-" + saved.getId())
+                    .hospital("MediConnect General Hospital")
+                    .licenseVerified(false)
+                    .build());
+        }
+        return saved;
     }
 
     // [A07] User Enumeration: three semantically distinct error messages reveal
